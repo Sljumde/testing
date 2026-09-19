@@ -139,6 +139,7 @@ export default function ViewInquiriesClient({
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [saveStatus, setSaveStatus] = useState("")
+  const [inquiryNoSearch, setInquiryNoSearch] = useState("")
   const didMountServerFiltersRef = useRef(false)
 
   const formatINR = (value: string | number | undefined | null) => {
@@ -909,6 +910,11 @@ export default function ViewInquiriesClient({
 
   const currentPageData = filteredInquiries
   const filteredRowCount = serverTotal
+  const exactInquiryNoSearch = inquiryNoSearch.trim()
+  const showExactInquiryNoSearch =
+    exactInquiryNoSearch.length > 0 &&
+    !filters.inquiryNo.includes(exactInquiryNoSearch) &&
+    !uniqueInquiryNos.includes(exactInquiryNoSearch)
 
   // Corrected handleSelectAll
   const handleSelectAll = () => {
@@ -1106,10 +1112,27 @@ export default function ViewInquiriesClient({
                     </PopoverTrigger>
                     <PopoverContent className="w-[280px] p-0">
                       <Command>
-                        <CommandInput placeholder="Search inquiry no..." className="h-9" />
+                        <CommandInput
+                          placeholder="Search inquiry no..."
+                          className="h-9"
+                          value={inquiryNoSearch}
+                          onValueChange={setInquiryNoSearch}
+                        />
                         <CommandList>
                           <CommandEmpty>No inquiry found.</CommandEmpty>
                           <CommandGroup>
+                            {showExactInquiryNoSearch && (
+                              <CommandItem
+                                key={`exact-${exactInquiryNoSearch}`}
+                                value={exactInquiryNoSearch}
+                                onSelect={() => {
+                                  setFilters({ ...filters, inquiryNo: [...filters.inquiryNo, exactInquiryNoSearch] })
+                                  setInquiryNoSearch("")
+                                }}
+                              >
+                                Search exact inquiry no {exactInquiryNoSearch}
+                              </CommandItem>
+                            )}
                             {uniqueInquiryNos.map((inq) => (
                               <CommandItem
                                 key={inq}
@@ -1118,6 +1141,7 @@ export default function ViewInquiriesClient({
                                     ? filters.inquiryNo.filter((v) => v !== inq)
                                     : [...filters.inquiryNo, inq]
                                   setFilters({ ...filters, inquiryNo: newValues })
+                                  setInquiryNoSearch("")
                                 }}
                               >
                                 {inq}
@@ -1277,12 +1301,15 @@ export default function ViewInquiriesClient({
                 </div>
 
                 {/* Phone */}
-                <Input
-                  placeholder="Phone"
-                  value={filters.phone}
-                  onChange={(e) => setFilters({ ...filters, phone: e.target.value })}
-                  className="h-11 px-3 text-sm border-gray-300 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 rounded-lg"
-                />
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-gray-700">Phone</label>
+                  <Input
+                    placeholder="Phone"
+                    value={filters.phone}
+                    onChange={(e) => setFilters({ ...filters, phone: e.target.value })}
+                    className="h-11 px-3 text-sm border-gray-300 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 rounded-lg"
+                  />
+                </div>
 
                 {/* Email */}
                 <div className="space-y-1.5">
