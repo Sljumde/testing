@@ -237,7 +237,9 @@ export async function createSupabaseInquiry({
   requestId,
   payload,
 }: DirectInquiryInput): Promise<DirectInquiryResult> {
-  for (let attempt = 1; attempt <= 5; attempt += 1) {
+  const maxAllocationAttempts = 300
+
+  for (let attempt = 1; attempt <= maxAllocationAttempts; attempt += 1) {
     const inquiryNo = await allocateInquiryNo(supabase)
     const insertPayload = await buildSupabaseInquiryPayload({ supabase, inquiryNo, actorEmail, requestId, payload })
 
@@ -253,7 +255,15 @@ export async function createSupabaseInquiry({
       }
     }
 
-    if (isUniqueViolation(error)) continue
+    if (isUniqueViolation(error)) {
+      console.warn("[inquiry-supabase-create] duplicate allocated inquiry number; retrying", {
+        requestId,
+        inquiryNo,
+        attempt,
+        maxAllocationAttempts,
+      })
+      continue
+    }
 
     console.error("[inquiry-supabase-create]", {
       requestId,
@@ -265,5 +275,5 @@ export async function createSupabaseInquiry({
     throw error
   }
 
-  throw new Error("Unable to allocate a unique Supabase inquiry number after retries")
+  throw new Error(`Unable to allocate a unique Supabase inquiry number after ${maxAllocationAttempts} retries`)
 }
