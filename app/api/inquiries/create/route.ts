@@ -1,13 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "@/lib/auth"
 import {
-  normalizeKorosunoBusinessPayload,
+  normalizeInquiryBusinessPayload,
   normalizeRequestId,
   stableInquiryContentHash,
-  validateKorosunoBusinessPayload,
-} from "@/lib/korosuno-create"
-import { markInquiryFailed, markInquiryQueued, markInquirySuccess } from "@/lib/inquiry-queue"
-import { createSupabaseInquiry } from "@/lib/supabase-inquiry-sync"
+  validateInquiryBusinessPayload,
+} from "@/lib/inquiry-create"
+import { markInquiryFailed, markInquiryQueued, publishInquiryCreateJob } from "@/lib/inquiry-queue"
 import { getAuthenticatedSupabaseServerClient } from "@/lib/supabase/server"
 import { createAppLogger, type AppLogger } from "@/lib/app-logger"
 
@@ -36,7 +35,7 @@ export async function POST(request: NextRequest) {
   const routeStartedAt = Date.now()
   let requestId = ""
   let actorEmail = ""
-  let businessPayload: ReturnType<typeof normalizeKorosunoBusinessPayload> | null = null
+  let businessPayload: ReturnType<typeof normalizeInquiryBusinessPayload> | null = null
   let logger: AppLogger | null = null
 
   try {
@@ -48,8 +47,8 @@ export async function POST(request: NextRequest) {
       method: "POST",
       action: "CREATE",
       resource: "inquiries",
-      operation: "create_inquiry",
-      query: "inquiries.insert(insertPayload)",
+      operation: "queue_create_inquiry",
+      query: "qstash.publishJSON(/api/jobs/create-inquiry)",
       metadata: {
         company: rawBody?.company || null,
         contactName: rawBody?.contactName || null,
@@ -83,8 +82,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    businessPayload = normalizeKorosunoBusinessPayload(rawBody || {})
-    const validation = validateKorosunoBusinessPayload(businessPayload)
+    businessPayload = normalizeInquiryBusinessPayload(rawBody || {})
+    const validation = validateInquiryBusinessPayload(businessPayload)
     const payloadHash = stableInquiryContentHash(businessPayload)
 
     if (!validation.valid) {
@@ -145,47 +144,60 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const result = await createSupabaseInquiry({
-      supabase: supabaseAuth.supabase,
-      actorEmail,
-      requestId,
-      payload: businessPayload,
-    })
+    if ((queuedStatus.status === "QUEUED" && queuedStatus.qstashMessageId) || queuedStatus.status === "PROCESSING") {
+      await logger.success({
+        statusCode: 202,
+        metadata: {
+          queued: true,
+          status: queuedStatus.status,
+          qstashMessageId: queuedStatus.qstashMessageId || null,
+        },
+      })
 
-    await markInquirySuccess(job, {
-      inquiryNo: result.inquiryNo,
-      company: result.company || businessPayload.company,
-      contactName: result.contactName || businessPayload.contactName,
-    })
+      return NextResponse.json(
+        {
+          success: false,
+          pending: true,
+          requestId,
+          status: queuedStatus.status,
+          qstashMessageId: queuedStatus.qstashMessageId,
+          message: "Submission queued. Confirming Inquiry Number...",
+        },
+        { status: 202 },
+      )
+    }
+
+    const publishResult = await publishInquiryCreateJob(job)
 
     console.info("[inquiry-create]", {
       requestId,
       actorEmail,
-      inquiryNo: result.inquiryNo,
-      stage: "supabase_create",
-      result: "success",
+      stage: "qstash_publish",
+      result: "queued",
+      messageId: publishResult.messageId,
       routeDurationMs: Date.now() - routeStartedAt,
     })
 
     await logger.success({
-      statusCode: 200,
-      targetId: result.inquiryNo,
+      statusCode: 202,
       metadata: {
-        inquiryNo: result.inquiryNo,
+        qstashMessageId: publishResult.messageId,
         company_id: businessPayload.company_id || null,
         contact_id: businessPayload.contact_id || null,
       },
     })
 
-    return NextResponse.json({
-      success: true,
-      requestId,
-      inquiryNo: result.inquiryNo,
-      company: result.company || businessPayload.company,
-      contactName: result.contactName || businessPayload.contactName,
-      salesPersonEmail: actorEmail,
-      created: true,
-    })
+    return NextResponse.json(
+      {
+        success: false,
+        pending: true,
+        requestId,
+        status: "QUEUED",
+        qstashMessageId: publishResult.messageId,
+        message: "Submission queued. Confirming Inquiry Number...",
+      },
+      { status: 202 },
+    )
   } catch (error) {
     const serializedError = serializeCreateError(error)
 

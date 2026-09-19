@@ -1,17 +1,17 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "@/lib/auth"
-import { getUserRoleInfo } from "@/lib/sheets"
-import { getSupabaseInquiryRows } from "@/lib/supabase-inquiries"
+import { getSupabaseUserRoleInfo } from "@/lib/supabase-roles"
+import { getSupabaseInquiryPage } from "@/lib/supabase-inquiries"
 import { createAppLogger } from "@/lib/app-logger"
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const logger = await createAppLogger({
     route: "/api/inquiries",
     method: "GET",
     action: "READ",
     resource: "inquiries",
     operation: "list_inquiries",
-    query: 'crm_inquiry_view.select("*").in("Sales Person Email", authorizedEmails)',
+    query: "inquiries paginated + crm_inquiry_view selected columns",
   })
 
   try {
@@ -22,13 +22,20 @@ export async function GET() {
       return NextResponse.json({ success: false, message: "Not authenticated" }, { status: 401 })
     }
 
-    const roleInfo = await getUserRoleInfo(session.email)
-    const data = await getSupabaseInquiryRows(roleInfo.authorizedEmails)
+    const roleInfo = await getSupabaseUserRoleInfo(session.email)
+    const searchParams = request.nextUrl.searchParams
+    const page = Number(searchParams.get("page") || 1)
+    const pageSize = Number(searchParams.get("pageSize") || 50)
+    const sort = searchParams.get("sort") || "inquiryNo.desc"
+    const data = await getSupabaseInquiryPage(roleInfo.authorizedEmails, { page, pageSize, sort })
 
     await logger.success({
       statusCode: 200,
       metadata: {
-        rowCount: data.length,
+        rowCount: data.items.length,
+        total: data.total,
+        page: data.page,
+        pageSize: data.pageSize,
         authorizedEmailCount: roleInfo.authorizedEmails.length,
       },
     })

@@ -84,12 +84,14 @@ export default function LoginClient({ artworkNames }: LoginClientProps) {
           {/* LEFT ARTWORK PANEL */}
           <aside className="relative overflow-hidden rounded-l-[34px] rounded-r-none">
             <div className="absolute inset-0" style={{ clipPath: "polygon(0 0, 100% 0, 91% 100%, 0 100%)" }}>
-              <img
-                src={artworkSrc}
-                alt=""
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-0 h-full w-full object-cover scale-[1.2] blur-3xl saturate-125 brightness-[0.7]"
-              />
+              {artworkSrc && (
+                <img
+                  src={artworkSrc}
+                  alt=""
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 h-full w-full object-cover scale-[1.2] blur-3xl saturate-125 brightness-[0.7]"
+                />
+              )}
               <div
                 className="pointer-events-none absolute inset-[16px]"
                 style={{
@@ -98,12 +100,14 @@ export default function LoginClient({ artworkNames }: LoginClientProps) {
                   boxShadow: "0 0 12px rgba(190,150,92,0.06)",
                 }}
               />
-              <img
-                src={artworkSrc}
-                alt="Login artwork"
-                className="pointer-events-none absolute inset-0 h-full w-full object-cover"
-                style={{ transform: "scale(1.04)", transformOrigin: "center" }}
-              />
+              {artworkSrc && (
+                <img
+                  src={artworkSrc}
+                  alt="Login artwork"
+                  className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+                  style={{ transform: "scale(1.04)", transformOrigin: "center" }}
+                />
+              )}
             </div>
           </aside>
 

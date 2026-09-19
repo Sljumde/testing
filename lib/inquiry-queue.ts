@@ -1,6 +1,6 @@
 import { Client } from "@upstash/qstash"
 import { Redis } from "@upstash/redis"
-import type { KorosunoBusinessPayload } from "./korosuno-create"
+import type { InquiryBusinessPayload } from "./inquiry-create"
 
 export type InquiryQueueStatusName = "QUEUED" | "PROCESSING" | "SUCCESS" | "FAILED"
 
@@ -22,7 +22,7 @@ export type InquiryQueueStatus = {
 export type InquiryCreateJob = {
   requestId: string
   actorEmail: string
-  businessPayload: KorosunoBusinessPayload
+  businessPayload: InquiryBusinessPayload
   payloadHash: string
 }
 

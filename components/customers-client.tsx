@@ -78,6 +78,7 @@ export default function CustomersClient({ userInfo }: { userInfo: UserInfo }) {
       await fetchCustomers()
       setFilters({
         customerCode: "",
+        cid: "",
         company: "",
         city: "",
         state: [],

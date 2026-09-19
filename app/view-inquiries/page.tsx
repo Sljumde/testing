@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
 import { getServerSession } from "@/lib/auth"
-import { getUserRoleInfo } from "@/lib/sheets"
-import { getSupabaseInquiryRows } from "@/lib/supabase-inquiries"
+import { getSupabaseUserRoleInfo } from "@/lib/supabase-roles"
+import { getSupabaseInquiryPage } from "@/lib/supabase-inquiries"
 import ViewInquiriesClient from "@/components/view-inquiries-client"
 
 export default async function ViewInquiriesPage() {
@@ -11,15 +11,23 @@ export default async function ViewInquiriesPage() {
     redirect("/login")
   }
 
-  const roleInfo = await getUserRoleInfo(session.email)
-  const inquiries = await getSupabaseInquiryRows(roleInfo.authorizedEmails)
+  const roleInfo = await getSupabaseUserRoleInfo(session.email)
+  const inquiryPage = await getSupabaseInquiryPage(roleInfo.authorizedEmails, {
+    page: 1,
+    pageSize: 50,
+    sort: "inquiryNo.desc",
+  })
 
   return (
     <ViewInquiriesClient
       userEmail={session.email}
       userRole={roleInfo.role}
       authorizedEmails={roleInfo.authorizedEmails}
-      initialInquiries={inquiries}
+      initialInquiries={inquiryPage.items}
+      initialPage={inquiryPage.page}
+      initialPageSize={inquiryPage.pageSize}
+      initialTotal={inquiryPage.total}
+      initialTotalPages={inquiryPage.totalPages}
     />
   )
 }

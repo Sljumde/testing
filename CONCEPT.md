@@ -115,23 +115,16 @@ Browser selection, copy, cut, context-menu, and drag restrictions deter casual c
 
 ### 2026-08-04
 
-- Create Inquiry now uses the Korosuno create architecture when `INQUIRY_CREATE_MODE=korosuno`.
-- Normal inquiry creation authenticates in Next.js, derives `Sales Person Email` from the server session, sends one stable `requestId` and stable business payload to Apps Script, and writes exactly one `Korosuno!A:X` row.
-- `Korosuno!A:X` columns are: Inquiry No, Timestamp, Company, Contact Name, Phone, Email, Category, Details, Lead Source, Sales Person Email, Sales Stage, Update Remarks, Next Steps, Next Followup Date, Budget, Quantity, TS Backup, OCCASSION, LOCATION, Inquiry Type, 2nd Owner, Back Office, 1st Owner, Lead Generator.
-- Create Inquiry no longer writes to `Inquiries`, `BACKUP`, `DELETED`, `Crucial`, dashboard sheets, Total, Q formulas, or legacy 36-column inquiry segments.
-- `Inquiries` remains the operational CRM table for dashboard, view/edit/delete inquiry flows, Keystone/Timeless, reports, filters, and KPIs until Korosuno-to-Inquiries sync is designed separately.
-- Apps Script keeps idempotency metadata in `InquiryRequestLog`; the 24-cell Korosuno row is stored as immutable `ROW_JSON`, while technical metadata is never placed in Korosuno business columns.
-- Inquiry numbers are allocated under `ScriptLock` from the maximum of `InquirySequence!B1` and Script Property `INQUIRY_SEQUENCE_FLOOR`; duplicate numbers are unacceptable, skipped numbers are acceptable.
-- Before production testing, `setupKorosuno()` must be run once, followed by `repairInquirySequence()`, which scans `InquirySequence!B1`, `Inquiries`, `Korosuno`, optional `BACKUP`, optional `DELETED`, and `InquiryRequestLog`.
+- Create Inquiry now uses QStash for orchestration and Supabase as the only write target.
+- Normal inquiry creation authenticates in Next.js, derives `Sales Person Email` from the server session, stores request status in Upstash Redis, publishes one stable QStash job, and lets `/api/jobs/create-inquiry` insert into Supabase.
+- Create Inquiry no longer writes to Google Sheets, Apps Script, `BACKUP`, `DELETED`, `Crucial`, dashboard sheets, Total, Q formulas, or legacy 36-column inquiry segments.
+- Inquiry numbers are allocated by the Supabase `next_inquiry_no` RPC inside the worker create path; duplicate numbers are unacceptable, skipped numbers are acceptable.
 - Browser submission generates one UUID only on first valid submit, freezes the payload, disables the form, shows a visible success modal with the Inquiry No, and redirects to `/dashboard` after roughly 1.8 seconds.
 - Timeout or uncertain network failure keeps the form blocked and polls `/api/inquiries/create-status?requestId=...` using the same requestId; it never creates a fresh request automatically.
-- Invalid JSON, empty responses, HTML error bodies, gateway interruptions, and create-request timeouts from Apps Script are treated as uncertain confirmation states, not definite create failures. The create route returns `202` with `pending: true` and the frontend keeps the original frozen request blocked while polling status.
+- The create route returns `202` with `pending: true` after the QStash publish and the frontend keeps the original frozen request blocked while polling status.
 - If status confirmation exceeds 90 seconds, the user remains on a blocking confirmation screen with `Check Again`; this button polls the same requestId and never resubmits the inquiry form.
-- Required server environment variables are `INQUIRY_CREATE_MODE=korosuno`, `CRM_APPS_SCRIPT_URL`, and `CRM_APPS_SCRIPT_SECRET`. The secret must never be exposed through `NEXT_PUBLIC_`.
-- Manual rollback is explicit only: set `INQUIRY_CREATE_MODE=legacy` to temporarily call the preserved `saveNewInquiry()` path. Missing Apps Script configuration in Korosuno mode returns 503 and creates nothing.
-- Apps Script source lives in `apps-script/` and must be deployed as a web app after setting Script Property `CRM_APPS_SCRIPT_SECRET` and enabling the Advanced Google Sheets API.
-- Local implementation checks on this date: `npx.cmd tsc --noEmit` reports pre-existing unrelated TypeScript failures outside the Korosuno create files; `npm run lint` cannot launch because `eslint` is not available in this checkout; `npm run build` passes. Live sequence repair and Korosuno row tests require deployed Apps Script credentials and must be executed outside this code-only change.
-- Future Korosuno-to-Inquiries synchronization is explicitly pending and is not part of this architecture change.
+- Required server environment variables are `APP_BASE_URL`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`, `UPSTASH_REDIS_REST_URL`, and `UPSTASH_REDIS_REST_TOKEN`.
+- Apps Script is no longer part of inquiry creation and the source has been removed.
 
 ### 2026-07-16
 

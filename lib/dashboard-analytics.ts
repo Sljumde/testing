@@ -1,4 +1,4 @@
-import { getUserRoleInfo } from "./sheets"
+import { getSupabaseUserRoleInfo } from "./supabase-roles"
 import { getSupabaseAdminClient } from "./supabase/server"
 
 type InquiryAnalyticsRow = {
@@ -134,7 +134,7 @@ async function getSupabaseAnalyticsRows(authorizedEmails: string[]) {
 }
 
 export async function getDashboardSummary(email: string) {
-  const role = await getUserRoleInfo(email)
+  const role = await getSupabaseUserRoleInfo(email)
   const rows = await getSupabaseAnalyticsRows(role.authorizedEmails)
   const self = key(email)
   const myInquiries = rows.filter((row) => key(row.sales_person_email_raw) === self)
@@ -178,7 +178,7 @@ export async function getDashboardSummary(email: string) {
 }
 
 export async function getTimeline(email: string, params: URLSearchParams) {
-  const role = await getUserRoleInfo(email)
+  const role = await getSupabaseUserRoleInfo(email)
   const rows = await getSupabaseAnalyticsRows(role.authorizedEmails)
   const type = params.get("type") || "all"
   const selectedSalesperson = key(params.get("salesperson"))

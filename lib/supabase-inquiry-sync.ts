@@ -1,6 +1,6 @@
 import "server-only"
 
-import type { KorosunoBusinessPayload } from "@/lib/korosuno-create"
+import type { InquiryBusinessPayload } from "@/lib/inquiry-create"
 import { getSupabaseAdminClient } from "@/lib/supabase/server"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
@@ -15,7 +15,7 @@ type SyncInquiryInput = {
   inquiryNo: string
   actorEmail: string
   requestId: string
-  payload: KorosunoBusinessPayload
+  payload: InquiryBusinessPayload
 }
 
 type DirectInquiryResult = {
@@ -266,33 +266,4 @@ export async function createSupabaseInquiry({
   }
 
   throw new Error("Unable to allocate a unique Supabase inquiry number after retries")
-}
-
-export async function syncKorosunoInquiryToSupabase({ inquiryNo, actorEmail, requestId, payload }: SyncInquiryInput) {
-  const supabase = getSupabaseAdminClient()
-  const insertPayload = await buildSupabaseInquiryPayload({ supabase, inquiryNo, actorEmail, requestId, payload })
-
-  const { error } = await supabase.from("inquiries").upsert(insertPayload, {
-    onConflict: "inquiry_no",
-    ignoreDuplicates: true,
-  })
-
-  if (error) {
-    console.error("[inquiry-supabase-sync]", {
-      requestId,
-      inquiryNo,
-      company_id: payload.company_id || null,
-      contact_id: payload.contact_id || null,
-      error: serializeSupabaseError(error),
-    })
-    throw error
-  }
-
-  console.info("[inquiry-supabase-sync]", {
-    requestId,
-    inquiryNo,
-    company_id: payload.company_id || null,
-    contact_id: payload.contact_id || null,
-    result: "success",
-  })
 }

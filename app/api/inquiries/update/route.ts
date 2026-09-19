@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { getServerSession } from "@/lib/auth"
-import { getUserRoleInfo } from "@/lib/sheets"
+import { getSupabaseUserRoleInfo } from "@/lib/supabase-roles"
 import { getAuthenticatedSupabaseServerClient } from "@/lib/supabase/server"
 import { createAppLogger, type AppLogger } from "@/lib/app-logger"
 import type { SupabaseClient } from "@supabase/supabase-js"
@@ -295,7 +295,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, message: "Invalid updates data" }, { status: 400 })
     }
 
-    const roleInfo = await getUserRoleInfo(session.email)
+    const roleInfo = await getSupabaseUserRoleInfo(session.email)
     const supabaseAuth = await getAuthenticatedSupabaseServerClient()
 
     if (supabaseAuth.error || !supabaseAuth.supabase || !supabaseAuth.user) {

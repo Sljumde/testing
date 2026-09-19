@@ -30,6 +30,40 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 
 type InquiryRow = string[]
+type SortKey =
+  | "inquiryNo"
+  | "timestamp"
+  | "company"
+  | "contactName"
+  | "phone"
+  | "email"
+  | "category"
+  | "details"
+  | "leadSource"
+  | "salesPerson"
+  | "salesStage"
+  | "updateRemarks"
+  | "nextSteps"
+  | "nextFollowupDate"
+  | "budget"
+  | "quantity"
+  | "estOrderValue"
+  | "attachments"
+  | "delayDays"
+  | "followupDate"
+  | "occasion"
+  | "location"
+  | "inquiryType"
+  | "secondOwner"
+  | "backOffice"
+  | "firstOwner"
+  | "leadGenerator"
+
+type SortConfig = {
+  key: SortKey | null
+  direction: "asc" | "desc"
+  keyMapping: Record<SortKey, number>
+}
 
 const EDIT_SAVE_TIMEOUT_MS = 60_000
 const INQUIRY_ROW_LENGTH = 46
@@ -38,28 +72,73 @@ const tableCellClass = "p-2 md:p-3 border-r align-top overflow-hidden break-word
 const tableTextClass = "block max-w-full whitespace-normal break-words text-xs leading-snug"
 const tableInputClass = "h-8 w-full min-w-0 max-w-full text-xs whitespace-normal break-words"
 const tableSelectTriggerClass = "h-8 w-full min-w-0 max-w-full text-xs whitespace-normal [&>span]:block [&>span]:max-w-full [&>span]:truncate"
+const SORT_KEY_MAPPING: Record<SortKey, number> = {
+  inquiryNo: 0,
+  timestamp: 1,
+  company: 2,
+  contactName: 3,
+  phone: 4,
+  email: 5,
+  category: 6,
+  details: 7,
+  leadSource: 8,
+  salesPerson: 9,
+  salesStage: 10,
+  updateRemarks: 11,
+  nextSteps: 12,
+  nextFollowupDate: 13,
+  budget: 14,
+  quantity: 15,
+  estOrderValue: 16,
+  attachments: 17,
+  delayDays: 18,
+  followupDate: 19,
+  occasion: 27,
+  location: 28,
+  inquiryType: 29,
+  secondOwner: 30,
+  backOffice: 31,
+  firstOwner: 32,
+  leadGenerator: 33,
+}
 
 interface Props {
   userEmail: string
   userRole: string
   authorizedEmails: string[]
   initialInquiries: InquiryRow[]
+  initialPage: number
+  initialPageSize: number
+  initialTotal: number
+  initialTotalPages: number
 }
 
-export default function ViewInquiriesClient({ userEmail, userRole, authorizedEmails, initialInquiries }: Props) {
+export default function ViewInquiriesClient({
+  userEmail,
+  userRole,
+  authorizedEmails,
+  initialInquiries,
+  initialPage,
+  initialPageSize,
+  initialTotal,
+  initialTotalPages,
+}: Props) {
   const router = useRouter()
   const [inquiries, setInquiries] = useState<InquiryRow[]>(initialInquiries)
   const [filteredInquiries, setFilteredInquiries] = useState<InquiryRow[]>(initialInquiries)
   const [editingRows, setEditingRows] = useState<Set<string>>(new Set())
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
-  const [editedData, setEditedData] = useState<Map<string, Partial<InquiryRow>>>(new Map())
+  const [editedData, setEditedData] = useState<Map<string, Record<number, string>>>(new Map())
   const [sortAsc, setSortAsc] = useState(false)
   const [timestampSort, setTimestampSort] = useState<"asc" | "desc" | null>(null)
   const [followupSort, setFollowupSort] = useState<"asc" | "desc" | null>(null)
   const [showFilters, setShowFilters] = useState(false)
   const [dropdownData, setDropdownData] = useState<Record<string, string[]>>({})
-  const [currentPage, setCurrentPage] = useState(1)
-  const [rowsPerPage] = useState(25)
+  const [currentPage, setCurrentPage] = useState(initialPage)
+  const [rowsPerPage] = useState(initialPageSize)
+  const [serverTotal, setServerTotal] = useState(initialTotal)
+  const [serverTotalPages, setServerTotalPages] = useState(initialTotalPages)
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: "inquiryNo", direction: "desc", keyMapping: SORT_KEY_MAPPING })
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [saveStatus, setSaveStatus] = useState("")
@@ -241,7 +320,6 @@ export default function ViewInquiriesClient({ userEmail, userRole, authorizedEma
     }
 
     setFilteredInquiries(filtered)
-    setCurrentPage(1)
   }
 
   const sortedInquiries = useMemo(() => {
@@ -270,12 +348,8 @@ export default function ViewInquiriesClient({ userEmail, userRole, authorizedEma
     return sorted
   }, [filteredInquiries, sortAsc, timestampSort, followupSort])
 
-  const paginatedInquiries = useMemo(() => {
-    const start = (currentPage - 1) * rowsPerPage
-    return sortedInquiries.slice(start, start + rowsPerPage)
-  }, [sortedInquiries, currentPage, rowsPerPage])
-
-  const totalPages = Math.ceil(sortedInquiries.length / rowsPerPage)
+  const paginatedInquiries = sortedInquiries
+  const totalPages = serverTotalPages
 
   const canEditRow = (row: InquiryRow) => {
     const rowSalesEmail = row[9]?.toLowerCase().trim()
@@ -401,11 +475,51 @@ export default function ViewInquiriesClient({ userEmail, userRole, authorizedEma
     )
   }
 
+  const apiSort = (config = sortConfig) => {
+    if (config.key === "timestamp") return `timestamp.${config.direction}`
+    return `inquiryNo.${config.direction === "asc" ? "asc" : "desc"}`
+  }
+
+  const loadInquiryPage = async (page: number, config = sortConfig, options: { silent?: boolean } = {}) => {
+    setIsRefreshing(true)
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(rowsPerPage),
+        sort: apiSort(config),
+      })
+      const res = await fetch(`/api/inquiries?${params}`, { cache: "no-store" })
+      const payload = await res.json()
+      if (!res.ok || !payload.success) throw new Error(payload.message || "Failed to fetch inquiries")
+
+      const next = payload.data
+      const items = Array.isArray(next?.items) ? next.items : Array.isArray(next) ? next : []
+      setInquiries(items)
+      setFilteredInquiries(items)
+      setCurrentPage(Number(next?.page || page))
+      setServerTotal(Number(next?.total || items.length))
+      setServerTotalPages(Number(next?.totalPages || 1))
+      setSelectedRows(new Set())
+      setEditingRows(new Set())
+      setEditedData(new Map())
+      if (!options.silent) toast.success("Data refreshed")
+    } catch (error) {
+      if (!options.silent) toast.error(error instanceof Error ? error.message : "Error refreshing data")
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
   const fetchInquiryByNo = async (inquiryNo: string) => {
-    const res = await fetch("/api/inquiries", { cache: "no-store" })
+    const params = new URLSearchParams({
+      page: String(currentPage),
+      pageSize: String(rowsPerPage),
+      sort: apiSort(),
+    })
+    const res = await fetch(`/api/inquiries?${params}`, { cache: "no-store" })
     const data = await res.json()
-    if (!data.success || !Array.isArray(data.data)) return null
-    return (data.data as InquiryRow[]).find((row) => row[0] === inquiryNo) || null
+    const items = data.success && Array.isArray(data.data?.items) ? data.data.items : []
+    return (items as InquiryRow[]).find((row) => row[0] === inquiryNo) || null
   }
 
   const rowsMatchEditedPayload = (authoritativeRow: InquiryRow, editedRow: InquiryRow) => {
@@ -542,24 +656,7 @@ export default function ViewInquiriesClient({ userEmail, userRole, authorizedEma
   }
 
   const refreshData = async (options: { silent?: boolean } = {}) => {
-    setIsRefreshing(true)
-    try {
-      const res = await fetch("/api/inquiries")
-      const data = await res.json()
-      if (data.success) {
-        setInquiries(data.data)
-        // After refresh, re-apply filters and reset selections/edits
-        applyFilters() // Re-apply filters to the new data
-        setSelectedRows(new Set())
-        setEditingRows(new Set())
-        setEditedData(new Map())
-        if (!options.silent) toast.success("Data refreshed")
-      }
-    } catch (error) {
-      if (!options.silent) toast.error("Error refreshing data")
-    } finally {
-      setIsRefreshing(false)
-    }
+    await loadInquiryPage(currentPage, sortConfig, options)
   }
 
   const handleLogout = async () => {
@@ -844,54 +941,23 @@ export default function ViewInquiriesClient({ userEmail, userRole, authorizedEma
   }
 
   // New state and handlers for sorting and pagination
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc", keyMapping: {} })
-
-  const handleSort = (key) => {
+  const handleSort = (key: SortKey) => {
     let direction = "asc"
     if (sortConfig.key === key && sortConfig.direction === "asc") {
       direction = "desc"
     }
-    setSortConfig({ key, direction, keyMapping: sortKeyMapping })
-  }
-
-  // Mapping sort keys to column indices
-  const sortKeyMapping = {
-    inquiryNo: 0,
-    timestamp: 1,
-    company: 2,
-    contactName: 3,
-    phone: 4,
-    email: 5,
-    category: 6,
-    details: 7,
-    leadSource: 8,
-    salesPerson: 9,
-    salesStage: 10,
-    updateRemarks: 11,
-    nextSteps: 12,
-    nextFollowupDate: 13,
-    budget: 14,
-    quantity: 15,
-    estOrderValue: 16,
-    attachments: 17,
-    delayDays: 18,
-    followupDate: 19, // Corresponds to index 19 in the row data
-    occasion: 27,
-    location: 28,
-    inquiryType: 29,
-    secondOwner: 30,
-    backOffice: 31,
-    firstOwner: 32,
-    leadGenerator: 33,
+    setSortConfig({ key, direction: direction as "asc" | "desc", keyMapping: SORT_KEY_MAPPING })
   }
 
   // Corrected handleSortActual to use the mapping and the new sortConfig structure
-  const handleSortActual = (key) => {
-    let direction = "asc"
+  const handleSortActual = (key: SortKey) => {
+    let direction: "asc" | "desc" = "asc"
     if (sortConfig.key === key && sortConfig.direction === "asc") {
       direction = "desc"
     }
-    setSortConfig({ key, direction, keyMapping: sortKeyMapping })
+    const nextConfig = { key, direction, keyMapping: SORT_KEY_MAPPING }
+    setSortConfig(nextConfig)
+    void loadInquiryPage(1, nextConfig, { silent: true })
   }
 
   // This is the main sorting and filtering logic for the table data
@@ -1024,8 +1090,8 @@ export default function ViewInquiriesClient({ userEmail, userRole, authorizedEma
     // selectedRows // selectedRows is not directly used for filtering/sorting/pagination logic itself
   ])
 
-  const currentPageData = sortedAndPaginatedInquiries
-  const filteredRowCount = filteredInquiries.length // Use filteredInquiries for total count shown in pagination
+  const currentPageData = sortedInquiries
+  const filteredRowCount = serverTotal
 
   // Corrected handleSelectAll
   const handleSelectAll = () => {
@@ -1038,7 +1104,7 @@ export default function ViewInquiriesClient({ userEmail, userRole, authorizedEma
   }
 
   // Corrected handleSelectRow
-  const handleSelectRow = (inquiryNo) => {
+  const handleSelectRow = (inquiryNo: string) => {
     const newSelected = new Set(selectedRows)
     if (newSelected.has(inquiryNo)) {
       newSelected.delete(inquiryNo)
@@ -2582,8 +2648,8 @@ export default function ViewInquiriesClient({ userEmail, userRole, authorizedEma
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                  disabled={currentPage === 1}
+                  onClick={() => loadInquiryPage(Math.max(1, currentPage - 1))}
+                  disabled={currentPage === 1 || isRefreshing}
                   className="h-8 text-xs md:text-sm"
                 >
                   <ChevronLeft className="h-3 w-3 md:h-4 md:w-4" />
@@ -2592,8 +2658,8 @@ export default function ViewInquiriesClient({ userEmail, userRole, authorizedEma
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-                  disabled={currentPage === totalPages}
+                  onClick={() => loadInquiryPage(Math.min(totalPages, currentPage + 1))}
+                  disabled={currentPage === totalPages || isRefreshing}
                   className="h-8 text-xs md:text-sm"
                 >
                   Next

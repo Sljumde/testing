@@ -2,7 +2,7 @@
 
 ## Project State
 
-This CRM was originally built around Google Sheets / Apps Script / Korosuno flows. We are migrating the system to Supabase while keeping the existing CRM UI mostly intact.
+This CRM was originally built around Google Sheets flows. Inquiry creation now uses QStash for orchestration and Supabase as the write target while the rest of the CRM migration continues.
 
 The current migration focus is:
 
@@ -72,7 +72,7 @@ Inquiry form
 → audit trigger sees auth.uid()
 ```
 
-The create route no longer depends on Apps Script/Korosuno for normal inquiry creation.
+The create route no longer depends on Apps Script for normal inquiry creation.
 
 Main files:
 
@@ -340,8 +340,8 @@ View inquiries UI:
 2. Delete is a soft delete, not a physical delete.
    Rows remain in Supabase for history and audit.
 
-3. Some old/background code still exists for Korosuno/App Script.
-   Normal inquiry creation no longer depends on it, but legacy routes may still remain.
+3. Some legacy Google Sheets code still exists outside inquiry creation.
+   Normal inquiry creation no longer depends on it.
 
 4. TypeScript check still has unrelated existing errors in:
    - `components/customers-client.tsx`
@@ -411,7 +411,7 @@ limit 50;
 
 ## Summary
 
-The CRM is now partially migrated from Google Sheets/Korosuno to Supabase.
+The CRM is now partially migrated from Google Sheets to Supabase.
 
 Normal user-driven inquiry create/update/delete operations are designed to use the authenticated Supabase user session so Postgres can correctly resolve `auth.uid()` and populate audit logs.
 

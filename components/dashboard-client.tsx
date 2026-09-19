@@ -49,7 +49,7 @@ export default function DashboardClient({
       const inquiriesData = await inquiriesRes.json()
       const customersData = await customersRes.json()
 
-      if (inquiriesData.success) setInquiryCount(inquiriesData.data.length)
+      if (inquiriesData.success) setInquiryCount(inquiriesData.data.total ?? inquiriesData.data.length ?? 0)
       if (customersData.success) setCustomerCount(customersData.data.total)
     } catch (error) {
       console.error("Error fetching counts:", error)

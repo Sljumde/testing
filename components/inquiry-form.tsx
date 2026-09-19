@@ -392,11 +392,6 @@ export default function InquiryForm({ userEmail }: { userEmail: string }) {
           return
         }
 
-        if (data.status === "FAILED" && data.errorCode === "KOROSUNO_UNCERTAIN_RESPONSE") {
-          setSubmitError("Submission may already be recorded. Checking the original request...")
-          continue
-        }
-
         if (data.status === "FAILED") {
           setConfirming(false)
           setLoading(false)
@@ -472,7 +467,7 @@ export default function InquiryForm({ userEmail }: { userEmail: string }) {
           created: data.created,
           idempotent: data.idempotent,
         })
-      } else if (res.status >= 400 && res.status < 500 && data.errorCode !== "KOROSUNO_CREATE_FAILED") {
+      } else if (res.status >= 400 && res.status < 500 && data.errorCode !== "INQUIRY_CREATE_FAILED") {
         setSubmitError(data.message || "Please correct the inquiry details.")
         toast.error(data.message || "Please correct the inquiry details.")
         submissionRef.current = null
