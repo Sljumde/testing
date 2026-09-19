@@ -10,6 +10,14 @@ export type InquiryPageResult = {
   total: number
   totalPages: number
 }
+export type InquiryPageFilters = {
+  inquiryNo?: string[]
+  company?: string[]
+  salesStage?: string[]
+  salesPersonEmail?: string[]
+  followupDateFrom?: string
+  followupDateTo?: string
+}
 
 type CrmInquiryViewRow = Record<string, unknown>
 
@@ -61,6 +69,10 @@ const VIEW_SELECT_COLUMNS = [
 
 function text(value: unknown) {
   return value == null ? "" : String(value)
+}
+
+function cleanList(values?: string[]) {
+  return [...new Set((values || []).map((value) => value.trim()).filter(Boolean))]
 }
 
 function viewCell(row: CrmInquiryViewRow, key: string) {
@@ -165,7 +177,7 @@ export async function getSupabaseInquiryRows(authorizedEmails: string[]) {
 
 export async function getSupabaseInquiryPage(
   authorizedEmails: string[],
-  input: { page?: number; pageSize?: number; sort?: string } = {},
+  input: { page?: number; pageSize?: number; sort?: string; filters?: InquiryPageFilters } = {},
 ): Promise<InquiryPageResult> {
   const supabase = getSupabaseAdminClient()
   const authorizedList = [...new Set(authorizedEmails.map((email) => email.toLowerCase().trim()).filter(Boolean))]
@@ -176,16 +188,36 @@ export async function getSupabaseInquiryPage(
     return { items: [], page: 1, pageSize, total: 0, totalPages: 1 }
   }
 
-  const ascending = input.sort === "inquiryNo.asc" || input.sort === "timestamp.asc"
-  const orderColumn = input.sort?.startsWith("timestamp.") ? "inquiry_timestamp" : "inquiry_no"
+  const ascending = input.sort?.endsWith(".asc") || false
+  const orderColumn =
+    input.sort?.startsWith("timestamp.") ? "inquiry_timestamp" :
+    input.sort?.startsWith("company.") ? "company_name_raw" :
+    input.sort?.startsWith("salesStage.") ? "sales_stage" :
+    input.sort?.startsWith("salesPerson.") ? "sales_person_email_raw" :
+    input.sort?.startsWith("followupDate.") ? "next_followup_date" :
+    "inquiry_no"
   const from = (requestedPage - 1) * pageSize
   const to = from + pageSize - 1
+  const filters = input.filters || {}
+  const filterInquiryNos = cleanList(filters.inquiryNo)
+  const filterCompanies = cleanList(filters.company)
+  const filterSalesStages = cleanList(filters.salesStage)
+  const filterSalesPeople = cleanList(filters.salesPersonEmail).map((email) => email.toLowerCase())
 
-  const { data: activePage, error, count } = await supabase
+  let query = supabase
     .from("inquiries")
     .select("inquiry_no", { count: "exact" })
     .in("sales_person_email_raw", authorizedList)
     .or("is_active.is.null,is_active.eq.true")
+
+  if (filterInquiryNos.length) query = query.in("inquiry_no", filterInquiryNos)
+  if (filterCompanies.length) query = query.in("company_name_raw", filterCompanies)
+  if (filterSalesStages.length) query = query.in("sales_stage", filterSalesStages)
+  if (filterSalesPeople.length) query = query.in("sales_person_email_raw", filterSalesPeople)
+  if (filters.followupDateFrom) query = query.gte("next_followup_date", filters.followupDateFrom)
+  if (filters.followupDateTo) query = query.lte("next_followup_date", filters.followupDateTo)
+
+  const { data: activePage, error, count } = await query
     .order(orderColumn, { ascending, nullsFirst: false })
     .range(from, to)
 

@@ -27,7 +27,19 @@ export async function GET(request: NextRequest) {
     const page = Number(searchParams.get("page") || 1)
     const pageSize = Number(searchParams.get("pageSize") || 50)
     const sort = searchParams.get("sort") || "inquiryNo.desc"
-    const data = await getSupabaseInquiryPage(roleInfo.authorizedEmails, { page, pageSize, sort })
+    const data = await getSupabaseInquiryPage(roleInfo.authorizedEmails, {
+      page,
+      pageSize,
+      sort,
+      filters: {
+        inquiryNo: searchParams.getAll("inquiryNo"),
+        company: searchParams.getAll("company"),
+        salesStage: searchParams.getAll("salesStage"),
+        salesPersonEmail: searchParams.getAll("salesPersonEmail"),
+        followupDateFrom: searchParams.get("followupDateFrom") || "",
+        followupDateTo: searchParams.get("followupDateTo") || "",
+      },
+    })
 
     await logger.success({
       statusCode: 200,

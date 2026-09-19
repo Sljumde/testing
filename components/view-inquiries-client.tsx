@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
@@ -129,9 +129,6 @@ export default function ViewInquiriesClient({
   const [editingRows, setEditingRows] = useState<Set<string>>(new Set())
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [editedData, setEditedData] = useState<Map<string, Record<number, string>>>(new Map())
-  const [sortAsc, setSortAsc] = useState(false)
-  const [timestampSort, setTimestampSort] = useState<"asc" | "desc" | null>(null)
-  const [followupSort, setFollowupSort] = useState<"asc" | "desc" | null>(null)
   const [showFilters, setShowFilters] = useState(false)
   const [dropdownData, setDropdownData] = useState<Record<string, string[]>>({})
   const [currentPage, setCurrentPage] = useState(initialPage)
@@ -142,6 +139,7 @@ export default function ViewInquiriesClient({
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [saveStatus, setSaveStatus] = useState("")
+  const didMountServerFiltersRef = useRef(false)
 
   const formatINR = (value: string | number | undefined | null) => {
     if (value === null || value === undefined || value === "") return ""
@@ -231,8 +229,39 @@ export default function ViewInquiriesClient({
   }, [])
 
   useEffect(() => {
-    applyFilters()
-  }, [filters, inquiries])
+    applyClientOnlyFilters()
+  }, [
+    inquiries,
+    filters.contactName,
+    filters.phone,
+    filters.email,
+    filters.category,
+    filters.leadSource,
+    filters.nextSteps,
+    filters.occasion,
+    filters.location,
+    filters.inquiryType,
+    filters.firstOwner,
+    filters.avgHeavyLifters,
+    filters.heavyLiftersTags,
+    filters.avgClosureDays,
+    filters.bigBulls,
+  ])
+
+  useEffect(() => {
+    if (!didMountServerFiltersRef.current) {
+      didMountServerFiltersRef.current = true
+      return
+    }
+    void loadInquiryPage(1, sortConfig, { silent: true })
+  }, [
+    filters.inquiryNo,
+    filters.company,
+    filters.salesStage,
+    filters.salesPersonEmail,
+    filters.followupDateFrom,
+    filters.followupDateTo,
+  ])
 
   const fetchDropdownData = async () => {
     try {
@@ -246,15 +275,9 @@ export default function ViewInquiriesClient({
     }
   }
 
-  const applyFilters = () => {
+  const applyClientOnlyFilters = () => {
     let filtered = [...inquiries]
 
-    if (filters.inquiryNo.length > 0) {
-      filtered = filtered.filter((row) => filters.inquiryNo.includes(row[0]))
-    }
-    if (filters.company.length > 0) {
-      filtered = filtered.filter((row) => filters.company.includes(row[2]))
-    }
     if (filters.contactName.length > 0) {
       filtered = filtered.filter((row) => filters.contactName.includes(row[3]))
     }
@@ -263,9 +286,6 @@ export default function ViewInquiriesClient({
     }
     if (filters.email.length > 0) {
       filtered = filtered.filter((row) => filters.email.includes(row[5]))
-    }
-    if (filters.salesPersonEmail.length > 0) {
-      filtered = filtered.filter((row) => filters.salesPersonEmail.includes(row[9]))
     }
     if (filters.firstOwner.length > 0) {
       filtered = filtered.filter((row) => filters.firstOwner.includes(row[32]))
@@ -277,9 +297,6 @@ export default function ViewInquiriesClient({
     }
     if (filters.leadSource.length > 0) {
       filtered = filtered.filter((row) => filters.leadSource.includes(row[8]))
-    }
-    if (filters.salesStage.length > 0) {
-      filtered = filtered.filter((row) => filters.salesStage.includes(row[10]))
     }
     if (filters.nextSteps.length > 0) {
       filtered = filtered.filter((row) => filters.nextSteps.includes(row[12]))
@@ -306,49 +323,9 @@ export default function ViewInquiriesClient({
       filtered = filtered.filter((row) => filters.bigBulls.includes(row[45]))
     }
 
-    // Date range filter
-    if (filters.followupDateFrom || filters.followupDateTo) {
-      filtered = filtered.filter((row) => {
-        const rowDate = new Date(row[20])
-        const fromDate = filters.followupDateFrom ? new Date(filters.followupDateFrom) : null
-        const toDate = filters.followupDateTo ? new Date(filters.followupDateTo) : null
-
-        if (fromDate && rowDate < fromDate) return false
-        if (toDate && rowDate > toDate) return false
-        return true
-      })
-    }
-
     setFilteredInquiries(filtered)
   }
 
-  const sortedInquiries = useMemo(() => {
-    const sorted = [...filteredInquiries]
-
-    if (timestampSort) {
-      sorted.sort((a, b) => {
-        const aDate = new Date(a[1] || 0).getTime()
-        const bDate = new Date(b[1] || 0).getTime()
-        return timestampSort === "asc" ? aDate - bDate : bDate - aDate
-      })
-    } else if (followupSort) {
-      sorted.sort((a, b) => {
-        const aDate = new Date(a[20] || 0).getTime()
-        const bDate = new Date(b[20] || 0).getTime()
-        return followupSort === "asc" ? aDate - bDate : bDate - aDate
-      })
-    } else {
-      sorted.sort((a, b) => {
-        const aNum = Number.parseInt(a[0]) || 0
-        const bNum = Number.parseInt(b[0]) || 0
-        // sortAsc = true means ascending (old to new), false means descending (new to old)
-        return sortAsc ? aNum - bNum : bNum - aNum
-      })
-    }
-    return sorted
-  }, [filteredInquiries, sortAsc, timestampSort, followupSort])
-
-  const paginatedInquiries = sortedInquiries
   const totalPages = serverTotalPages
 
   const canEditRow = (row: InquiryRow) => {
@@ -381,41 +358,6 @@ export default function ViewInquiriesClient({
     return false
   }
 
-  const toggleSort = () => {
-    setTimestampSort(null)
-    setFollowupSort(null)
-    setSortAsc(!sortAsc)
-  }
-
-  const toggleTimestampSort = () => {
-    setSortAsc(false)
-    setFollowupSort(null)
-    setTimestampSort((prev) => {
-      if (prev === null) return "desc" // First click: newest first
-      if (prev === "desc") return "asc" // Second click: oldest first
-      return null // Third click: back to default
-    })
-  }
-
-  const toggleFollowupSort = () => {
-    setSortAsc(false)
-    setTimestampSort(null)
-    setFollowupSort((prev) => {
-      if (prev === null) return "desc" // First click: newest first
-      if (prev === "desc") return "asc" // Second click: oldest first
-      return null // Third click: back to default
-    })
-  }
-
-  const toggleSelectAll = () => {
-    if (selectedRows.size === paginatedInquiries.length) {
-      setSelectedRows(new Set())
-    } else {
-      const allIds = paginatedInquiries.map((row) => row[0])
-      setSelectedRows(new Set(allIds))
-    }
-  }
-
   const toggleSelectRow = (inquiryNo: string) => {
     const newSelected = new Set(selectedRows)
     if (newSelected.has(inquiryNo)) {
@@ -433,7 +375,7 @@ export default function ViewInquiriesClient({
     }
 
     const unauthorized = Array.from(selectedRows).filter((inquiryNo) => {
-      const row = sortedInquiries.find((r) => r[0] === inquiryNo)
+      const row = filteredInquiries.find((r) => r[0] === inquiryNo)
       return row && !canEditRow(row)
     })
 
@@ -477,7 +419,20 @@ export default function ViewInquiriesClient({
 
   const apiSort = (config = sortConfig) => {
     if (config.key === "timestamp") return `timestamp.${config.direction}`
+    if (config.key === "company") return `company.${config.direction}`
+    if (config.key === "salesStage") return `salesStage.${config.direction}`
+    if (config.key === "salesPerson") return `salesPerson.${config.direction}`
+    if (config.key === "nextFollowupDate" || config.key === "followupDate") return `followupDate.${config.direction}`
     return `inquiryNo.${config.direction === "asc" ? "asc" : "desc"}`
+  }
+
+  const appendServerFilterParams = (params: URLSearchParams) => {
+    filters.inquiryNo.forEach((value) => params.append("inquiryNo", value))
+    filters.company.forEach((value) => params.append("company", value))
+    filters.salesStage.forEach((value) => params.append("salesStage", value))
+    filters.salesPersonEmail.forEach((value) => params.append("salesPersonEmail", value))
+    if (filters.followupDateFrom) params.set("followupDateFrom", filters.followupDateFrom)
+    if (filters.followupDateTo) params.set("followupDateTo", filters.followupDateTo)
   }
 
   const loadInquiryPage = async (page: number, config = sortConfig, options: { silent?: boolean } = {}) => {
@@ -488,6 +443,7 @@ export default function ViewInquiriesClient({
         pageSize: String(rowsPerPage),
         sort: apiSort(config),
       })
+      appendServerFilterParams(params)
       const res = await fetch(`/api/inquiries?${params}`, { cache: "no-store" })
       const payload = await res.json()
       if (!res.ok || !payload.success) throw new Error(payload.message || "Failed to fetch inquiries")
@@ -512,10 +468,11 @@ export default function ViewInquiriesClient({
 
   const fetchInquiryByNo = async (inquiryNo: string) => {
     const params = new URLSearchParams({
-      page: String(currentPage),
-      pageSize: String(rowsPerPage),
-      sort: apiSort(),
+      page: "1",
+      pageSize: "1",
+      sort: "inquiryNo.desc",
     })
+    params.append("inquiryNo", inquiryNo)
     const res = await fetch(`/api/inquiries?${params}`, { cache: "no-store" })
     const data = await res.json()
     const items = data.success && Array.isArray(data.data?.items) ? data.data.items : []
@@ -940,16 +897,6 @@ export default function ViewInquiriesClient({
     setFilters({ ...filters, [filterKey]: newValues })
   }
 
-  // New state and handlers for sorting and pagination
-  const handleSort = (key: SortKey) => {
-    let direction = "asc"
-    if (sortConfig.key === key && sortConfig.direction === "asc") {
-      direction = "desc"
-    }
-    setSortConfig({ key, direction: direction as "asc" | "desc", keyMapping: SORT_KEY_MAPPING })
-  }
-
-  // Corrected handleSortActual to use the mapping and the new sortConfig structure
   const handleSortActual = (key: SortKey) => {
     let direction: "asc" | "desc" = "asc"
     if (sortConfig.key === key && sortConfig.direction === "asc") {
@@ -960,137 +907,7 @@ export default function ViewInquiriesClient({
     void loadInquiryPage(1, nextConfig, { silent: true })
   }
 
-  // This is the main sorting and filtering logic for the table data
-  const sortedAndPaginatedInquiries = useMemo(() => {
-    let processedInquiries = [...inquiries]
-
-    // Apply filters first
-    if (filters.inquiryNo.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.inquiryNo.includes(row[0]))
-    }
-    if (filters.company.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.company.includes(row[2]))
-    }
-    if (filters.contactName.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.contactName.includes(row[3]))
-    }
-    if (filters.phone) {
-      processedInquiries = processedInquiries.filter((row) =>
-        row[4]?.toLowerCase().includes(filters.phone.toLowerCase()),
-      )
-    }
-    if (filters.email.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.email.includes(row[5]))
-    }
-    if (filters.salesPersonEmail.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.salesPersonEmail.includes(row[9]))
-    }
-    if (filters.firstOwner.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.firstOwner.includes(row[32]))
-    }
-
-    // Multiselect filters
-    if (filters.category.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.category.includes(row[6]))
-    }
-    if (filters.leadSource.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.leadSource.includes(row[8]))
-    }
-    if (filters.salesStage.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.salesStage.includes(row[10]))
-    }
-    if (filters.nextSteps.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.nextSteps.includes(row[12]))
-    }
-    if (filters.occasion.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.occasion.includes(row[27]))
-    }
-    if (filters.location.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.location.includes(row[28]))
-    }
-    if (filters.inquiryType.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.inquiryType.includes(row[29]))
-    }
-    if (filters.avgHeavyLifters.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.avgHeavyLifters.includes(row[42]))
-    }
-    if (filters.heavyLiftersTags.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.heavyLiftersTags.includes(row[43]))
-    }
-    if (filters.avgClosureDays.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.avgClosureDays.includes(row[44]))
-    }
-    if (filters.bigBulls.length > 0) {
-      processedInquiries = processedInquiries.filter((row) => filters.bigBulls.includes(row[45]))
-    }
-
-    // Date range filter
-    if (filters.followupDateFrom || filters.followupDateTo) {
-      processedInquiries = processedInquiries.filter((row) => {
-        const rowDateStr = row[20] // Followup Date is at index 20
-        if (!rowDateStr) return false
-        const rowDate = new Date(rowDateStr)
-        const fromDate = filters.followupDateFrom ? new Date(filters.followupDateFrom) : null
-        const toDate = filters.followupDateTo ? new Date(filters.followupDateTo) : null
-
-        if (fromDate && rowDate < fromDate) return false
-        if (toDate && rowDate > toDate) return false
-        return true
-      })
-    }
-
-    // Apply sorting
-    if (sortConfig.key) {
-      const sortColIndex = sortConfig.keyMapping[sortConfig.key]
-      if (sortColIndex !== undefined) {
-        processedInquiries.sort((a, b) => {
-          const valueA = a[sortColIndex]
-          const valueB = b[sortColIndex]
-
-          // Handle null/undefined values and date parsing for sorting
-          if (valueA === null || valueA === undefined) return sortConfig.direction === "asc" ? -1 : 1
-          if (valueB === null || valueB === undefined) return sortConfig.direction === "asc" ? 1 : -1
-
-          if (sortColIndex === 0) {
-            const numA = Number.parseInt(valueA) || 0
-            const numB = Number.parseInt(valueB) || 0
-            return sortConfig.direction === "asc" ? numA - numB : numB - numA
-          }
-
-          // Specific handling for date columns if necessary (e.g., index 1 and 20)
-          if (sortColIndex === 1 || sortColIndex === 20) {
-            const dateA = new Date(valueA).getTime()
-            const dateB = new Date(valueB).getTime()
-            if (isNaN(dateA) || isNaN(dateB)) return 0 // Handle invalid dates
-            return sortConfig.direction === "asc" ? dateA - dateB : dateB - dateA
-          }
-
-          // Default string/number comparison
-          if (valueA < valueB) {
-            return sortConfig.direction === "asc" ? -1 : 1
-          }
-          if (valueA > valueB) {
-            return sortConfig.direction === "asc" ? 1 : -1
-          }
-          return 0
-        })
-      }
-    }
-
-    // Apply pagination
-    const startIndex = (currentPage - 1) * rowsPerPage
-    const endIndex = startIndex + rowsPerPage
-    return processedInquiries.slice(startIndex, endIndex)
-  }, [
-    inquiries,
-    filters,
-    sortConfig,
-    currentPage,
-    rowsPerPage,
-    // selectedRows // selectedRows is not directly used for filtering/sorting/pagination logic itself
-  ])
-
-  const currentPageData = sortedInquiries
+  const currentPageData = filteredInquiries
   const filteredRowCount = serverTotal
 
   // Corrected handleSelectAll
@@ -2170,7 +1987,12 @@ export default function ViewInquiriesClient({
                   >
                     Timestamp {sortConfig.key === "timestamp" && (sortConfig.direction === "asc" ? "↑" : "↓")}
                   </th>
-                  <th className="p-2 md:p-3 border-r text-xs md:text-sm font-semibold whitespace-nowrap">Company</th>
+                  <th
+                    className="p-2 md:p-3 border-r text-xs md:text-sm font-semibold whitespace-nowrap cursor-pointer hover:bg-orange-600/30"
+                    onClick={() => handleSortActual("company")}
+                  >
+                    Company {sortConfig.key === "company" && (sortConfig.direction === "asc" ? "↑" : "↓")}
+                  </th>
                   <th className="p-2 md:p-3 border-r text-xs md:text-sm font-semibold whitespace-nowrap">
                     Contact Name
                   </th>
@@ -2181,18 +2003,28 @@ export default function ViewInquiriesClient({
                   <th className="p-2 md:p-3 border-r text-xs md:text-sm font-semibold whitespace-nowrap">
                     Lead Source
                   </th>
-                  <th className="p-2 md:p-3 border-r text-xs md:text-sm font-semibold whitespace-nowrap">
-                    Sales Person
+                  <th
+                    className="p-2 md:p-3 border-r text-xs md:text-sm font-semibold whitespace-nowrap cursor-pointer hover:bg-orange-600/30"
+                    onClick={() => handleSortActual("salesPerson")}
+                  >
+                    Sales Person {sortConfig.key === "salesPerson" && (sortConfig.direction === "asc" ? "↑" : "↓")}
                   </th>
-                  <th className="p-2 md:p-3 border-r text-xs md:text-sm font-semibold whitespace-nowrap">
-                    Sales Stage
+                  <th
+                    className="p-2 md:p-3 border-r text-xs md:text-sm font-semibold whitespace-nowrap cursor-pointer hover:bg-orange-600/30"
+                    onClick={() => handleSortActual("salesStage")}
+                  >
+                    Sales Stage {sortConfig.key === "salesStage" && (sortConfig.direction === "asc" ? "↑" : "↓")}
                   </th>
                   <th className="p-2 md:p-3 border-r text-xs md:text-sm font-semibold whitespace-nowrap">
                     Update Remarks
                   </th>
                   <th className="p-2 md:p-3 border-r text-xs md:text-sm font-semibold whitespace-nowrap">Next Steps</th>
-                  <th className="p-2 md:p-3 border-r text-xs md:text-sm font-semibold whitespace-nowrap">
-                    Next Followup Date
+                  <th
+                    className="p-2 md:p-3 border-r text-xs md:text-sm font-semibold whitespace-nowrap cursor-pointer hover:bg-orange-600/30"
+                    onClick={() => handleSortActual("nextFollowupDate")}
+                  >
+                    Next Followup Date{" "}
+                    {sortConfig.key === "nextFollowupDate" && (sortConfig.direction === "asc" ? "↑" : "↓")}
                   </th>
                   <th className="p-2 md:p-3 border-r text-xs md:text-sm font-semibold whitespace-nowrap">Budget</th>
                   <th className="p-2 md:p-3 border-r text-xs md:text-sm font-semibold whitespace-nowrap">Quantity</th>
