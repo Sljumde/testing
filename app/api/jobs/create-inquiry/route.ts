@@ -17,6 +17,70 @@ import { getSupabaseAdminClient } from "@/lib/supabase/server"
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
+function deploymentMetadata() {
+  return {
+    environment: process.env.VERCEL_ENV || process.env.NODE_ENV || null,
+    deploymentId: process.env.VERCEL_DEPLOYMENT_ID || null,
+    deploymentUrl: process.env.VERCEL_URL || null,
+    commitSha: process.env.VERCEL_GIT_COMMIT_SHA || process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || null,
+    commitRef: process.env.VERCEL_GIT_COMMIT_REF || process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_REF || null,
+  }
+}
+
+function serializeError(error: unknown) {
+  if (!error || typeof error !== "object") return { name: "Error", message: String(error) }
+  const value = error as { name?: string; message?: string; code?: string; details?: string; hint?: string; stack?: string }
+  return {
+    name: value.name || "Error",
+    message: value.message || String(error),
+    code: value.code || null,
+    details: value.details || null,
+    hint: value.hint || null,
+    stack: value.stack || null,
+  }
+}
+
+async function writeWorkerLog(
+  job: InquiryCreateJob,
+  status: "started" | "success" | "failure",
+  input: {
+    startedAt: number
+    statusCode?: number
+    targetId?: string | number | null
+    metadata?: Record<string, unknown>
+    error?: unknown
+  },
+) {
+  const payload = {
+    request_id: job.requestId,
+    route: "/api/jobs/create-inquiry",
+    method: "POST",
+    action: "CREATE",
+    resource: "inquiries",
+    operation: "worker_create_inquiry",
+    query: "inquiries.insert(insertPayload)",
+    target_id: input.targetId == null ? null : String(input.targetId),
+    status,
+    status_code: input.statusCode ?? null,
+    duration_ms: Date.now() - input.startedAt,
+    user_email: job.actorEmail,
+    user_role: null,
+    supabase_auth_user_id: null,
+    deployment: deploymentMetadata(),
+    metadata: {
+      company: job.businessPayload.company,
+      contactName: job.businessPayload.contactName,
+      company_id: job.businessPayload.company_id || null,
+      contact_id: job.businessPayload.contact_id || null,
+      ...(input.metadata || {}),
+    },
+    error: input.error ? serializeError(input.error) : null,
+  }
+
+  const { error } = await getSupabaseAdminClient().from("application_logs").insert(payload)
+  if (error) console.error("[inquiry-create-worker-log] insert failed", { requestId: job.requestId, error: serializeError(error) })
+}
+
 function isValidJob(value: unknown): value is InquiryCreateJob {
   if (!value || typeof value !== "object") return false
   const job = value as Partial<InquiryCreateJob>
@@ -83,6 +147,7 @@ async function handler(request: Request) {
   }
 
   await markInquiryProcessing(job)
+  await writeWorkerLog(job, "started", { startedAt: routeStartedAt })
 
   try {
     const result = await createSupabaseInquiry({
@@ -97,6 +162,12 @@ async function handler(request: Request) {
       company: result.company || job.businessPayload.company,
       contactName: result.contactName || job.businessPayload.contactName,
     })
+    await writeWorkerLog(job, "success", {
+      startedAt: routeStartedAt,
+      statusCode: 200,
+      targetId: result.inquiryNo,
+      metadata: { inquiryNo: result.inquiryNo },
+    })
 
     console.info("[inquiry-create-worker]", {
       requestId: job.requestId,
@@ -108,6 +179,11 @@ async function handler(request: Request) {
 
     return Response.json({ success: true, inquiryNo: result.inquiryNo })
   } catch (error) {
+    await writeWorkerLog(job, "failure", {
+      startedAt: routeStartedAt,
+      statusCode: 500,
+      error,
+    })
     await markInquiryFailed(job, {
       errorCode: error instanceof Error ? error.message : "INQUIRY_WORKER_ERROR",
       errorMessage: "Inquiry worker failed before confirming creation. Check worker logs before retrying this request.",

@@ -248,6 +248,15 @@ export async function createSupabaseInquiry({
       .insert(insertPayload)
 
     if (!error) {
+      const { data: confirmedRow, error: confirmError } = await supabase
+        .from("inquiries")
+        .select("inquiry_no")
+        .eq("inquiry_no", inquiryNo)
+        .maybeSingle()
+
+      if (confirmError) throw confirmError
+      if (!confirmedRow) throw new Error(`Inquiry ${inquiryNo} was inserted but could not be confirmed in Supabase`)
+
       return {
         inquiryNo,
         company: payload.company,
