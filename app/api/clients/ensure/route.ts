@@ -152,6 +152,7 @@ export async function POST(request: NextRequest) {
 
     let company = existingCompany as { company_id: number | string; company_name: string } | null
     let categoryId: number | string | null = null
+    const companyCreated = !company
 
     if (!company) {
       const { data: newCompany, error: companyError } = await supabase
@@ -175,26 +176,82 @@ export async function POST(request: NextRequest) {
       company = newCompany as { company_id: number | string; company_name: string }
     }
 
-    const { data: existingContacts, error: contactLookupError } = await supabase
-      .from("contacts")
-      .select("contact_id, contact_person_name, phone_no, email, city, state")
-      .eq("company_id", company.company_id)
-      .limit(200)
+    const categoryPromise = (async () => {
+      if (!categoryName) return null
 
-    if (contactLookupError) {
-      console.error("[clients-ensure] contact lookup", serializeSupabaseError(contactLookupError))
-      await logger.failure({
-        statusCode: 500,
-        targetId: company.company_id,
-        error: contactLookupError,
-        metadata: { query: "contacts.select", company_id: company.company_id },
-      })
-      return NextResponse.json({ success: false, message: "Unable to check existing contacts." }, { status: 500 })
+      const { data: category, error: categoryError } = await supabase
+        .from("categories")
+        .select("category_id, category_name")
+        .ilike("category_name", categoryName)
+        .eq("is_active", true)
+        .maybeSingle()
+
+      if (categoryError) {
+        console.error("[clients-ensure] category lookup", serializeSupabaseError(categoryError))
+        await logger.failure({
+          statusCode: 207,
+          targetId: company.company_id,
+          error: categoryError,
+          metadata: { query: "categories.select", categoryName },
+        })
+        return null
+      }
+
+      if (!category) return null
+
+      const { error: relationshipError } = await supabase
+        .from("company_categories")
+        .upsert(
+          {
+            company_id: company.company_id,
+            category_id: category.category_id,
+          },
+          {
+            onConflict: "company_id,category_id",
+            ignoreDuplicates: true,
+          },
+        )
+
+      if (relationshipError) {
+        console.error("[clients-ensure] category relationship", serializeSupabaseError(relationshipError))
+        await logger.failure({
+          statusCode: 207,
+          targetId: company.company_id,
+          error: relationshipError,
+          metadata: { query: "company_categories.upsert", company_id: company.company_id, category_id: category.category_id },
+        })
+      }
+
+      return category.category_id as number | string
+    })()
+
+    let existingContacts: ContactRow[] = []
+
+    if (!companyCreated) {
+      const { data, error: contactLookupError } = await supabase
+        .from("contacts")
+        .select("contact_id, contact_person_name, phone_no, email, city, state")
+        .eq("company_id", company.company_id)
+        .limit(200)
+
+      if (contactLookupError) {
+        console.error("[clients-ensure] contact lookup", serializeSupabaseError(contactLookupError))
+        await logger.failure({
+          statusCode: 500,
+          targetId: company.company_id,
+          error: contactLookupError,
+          metadata: { query: "contacts.select", company_id: company.company_id },
+        })
+        return NextResponse.json({ success: false, message: "Unable to check existing contacts." }, { status: 500 })
+      }
+
+      existingContacts = (data || []) as ContactRow[]
     }
 
-    let contact = ((existingContacts || []) as ContactRow[]).find((candidate) =>
+    let contact = existingContacts.find((candidate) =>
       sameContact(candidate, { contactName, phone, email }),
     )
+    const existingContactFound = Boolean(contact)
 
     if (!contact) {
       const { data: newContact, error: contactError } = await supabase
@@ -226,48 +283,7 @@ export async function POST(request: NextRequest) {
       contact = newContact as ContactRow
     }
 
-    if (categoryName) {
-      const { data: category, error: categoryError } = await supabase
-        .from("categories")
-        .select("category_id, category_name")
-        .ilike("category_name", categoryName)
-        .eq("is_active", true)
-        .maybeSingle()
-
-      if (categoryError) {
-        console.error("[clients-ensure] category lookup", serializeSupabaseError(categoryError))
-        await logger.failure({
-          statusCode: 207,
-          targetId: company.company_id,
-          error: categoryError,
-          metadata: { query: "categories.select", categoryName },
-        })
-      } else if (category) {
-        categoryId = category.category_id as number | string
-        const { error: relationshipError } = await supabase
-          .from("company_categories")
-          .upsert(
-            {
-              company_id: company.company_id,
-              category_id: category.category_id,
-            },
-            {
-              onConflict: "company_id,category_id",
-              ignoreDuplicates: true,
-            },
-          )
-
-        if (relationshipError) {
-          console.error("[clients-ensure] category relationship", serializeSupabaseError(relationshipError))
-          await logger.failure({
-            statusCode: 207,
-            targetId: company.company_id,
-            error: relationshipError,
-            metadata: { query: "company_categories.upsert", company_id: company.company_id, category_id: category.category_id },
-          })
-        }
-      }
-    }
+    categoryId = await categoryPromise
 
     await logger.success({
       statusCode: 200,
@@ -276,10 +292,8 @@ export async function POST(request: NextRequest) {
         company_id: company.company_id,
         contact_id: contact.contact_id,
         category_id: categoryId,
-        companyCreated: !existingCompany,
-        contactCreated: !((existingContacts || []) as ContactRow[]).some((candidate) =>
-          sameContact(candidate, { contactName, phone, email }),
-        ),
+        companyCreated,
+        contactCreated: !existingContactFound,
       },
     })
 

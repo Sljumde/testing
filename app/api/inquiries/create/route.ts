@@ -1,4 +1,4 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { after, type NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "@/lib/auth"
 import {
   normalizeInquiryBusinessPayload,
@@ -6,7 +6,7 @@ import {
   stableInquiryContentHash,
   validateInquiryBusinessPayload,
 } from "@/lib/inquiry-create"
-import { markInquiryFailed, markInquiryQueued, markInquirySuccess } from "@/lib/inquiry-queue"
+import { markInquiryFailed, markInquirySuccess } from "@/lib/inquiry-queue"
 import { createSupabaseInquiry } from "@/lib/supabase-inquiry-sync"
 import { getAuthenticatedSupabaseServerClient, getSupabaseAdminClient } from "@/lib/supabase/server"
 import { createAppLogger, type AppLogger } from "@/lib/app-logger"
@@ -110,68 +110,14 @@ export async function POST(request: NextRequest) {
       payloadHash,
     }
 
-    const queuedStatus = await markInquiryQueued(job)
-    if (queuedStatus.payloadHash !== payloadHash) {
-      await logger.failure({
-        statusCode: 409,
-        error: new Error("The same requestId was used with different inquiry data"),
-        metadata: { errorCode: "REQUEST_ID_PAYLOAD_MISMATCH" },
-      })
-      return NextResponse.json(
-        {
-          success: false,
-          requestId,
-          message: "The same requestId was used with different inquiry data",
-          errorCode: "REQUEST_ID_PAYLOAD_MISMATCH",
-        },
-        { status: 409 },
-      )
-    }
-
-    if (queuedStatus.status === "SUCCESS" && queuedStatus.inquiryNo) {
-      const { data: confirmedRow, error: confirmError } = await getSupabaseAdminClient()
-        .from("inquiries")
-        .select("inquiry_no")
-        .eq("inquiry_no", queuedStatus.inquiryNo)
-        .maybeSingle()
-
-      if (confirmError) throw confirmError
-
-      if (confirmedRow) {
-        await logger.success({
-          statusCode: 200,
-          targetId: queuedStatus.inquiryNo,
-          metadata: { idempotent: true },
-        })
-        return NextResponse.json({
-          success: true,
-          requestId,
-          inquiryNo: queuedStatus.inquiryNo,
-          company: queuedStatus.company || businessPayload.company,
-          contactName: queuedStatus.contactName || businessPayload.contactName,
-          salesPersonEmail: actorEmail,
-          idempotent: true,
-        })
-      }
-
-      await markInquiryFailed(job, {
-        errorCode: "SUCCESS_ROW_MISSING",
-        errorMessage: `Inquiry ${queuedStatus.inquiryNo} was marked successful but is missing in Supabase. Recreating from the original request.`,
-      })
-    }
-
     const result = await createSupabaseInquiry({
       supabase: getSupabaseAdminClient(),
       actorEmail,
       requestId,
       payload: businessPayload,
     })
-
-    await markInquirySuccess(job, {
-      inquiryNo: result.inquiryNo,
-      company: result.company || businessPayload.company,
-      contactName: result.contactName || businessPayload.contactName,
-    })
+    const responseCompany = result.company || businessPayload.company
+    const responseContactName = result.contactName || businessPayload.contactName
 
     await logger.success({
       statusCode: 200,
@@ -182,6 +128,20 @@ export async function POST(request: NextRequest) {
         contact_id: businessPayload.contact_id || null,
       },
     })
+
+    after(() =>
+      markInquirySuccess(job, {
+        inquiryNo: result.inquiryNo,
+        company: responseCompany,
+        contactName: responseContactName,
+      }).catch((statusError) => {
+        console.error("[inquiry-create] status update failed", {
+          requestId,
+          inquiryNo: result.inquiryNo,
+          error: serializeCreateError(statusError),
+        })
+      }),
+    )
 
     console.info("[inquiry-create]", {
       requestId,
@@ -195,8 +155,8 @@ export async function POST(request: NextRequest) {
       success: true,
       requestId,
       inquiryNo: result.inquiryNo,
-      company: result.company || businessPayload.company,
-      contactName: result.contactName || businessPayload.contactName,
+      company: responseCompany,
+      contactName: responseContactName,
       salesPersonEmail: actorEmail,
     })
   } catch (error) {
