@@ -1,7 +1,6 @@
 import "server-only"
 
 import type { InquiryBusinessPayload } from "@/lib/inquiry-create"
-import { getSupabaseAdminClient } from "@/lib/supabase/server"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 type EmployeeRow = {
@@ -249,46 +248,15 @@ export async function createSupabaseInquiry({
   requestId,
   payload,
 }: DirectInquiryInput): Promise<DirectInquiryResult> {
-  const maxAllocationAttempts = 300
+  const { data, error } = await supabase.rpc("crm_create_inquiry", {
+    p_request_id: requestId,
+    p_actor_email: actorEmail,
+    p_payload: payload,
+  })
 
-  for (let attempt = 1; attempt <= maxAllocationAttempts; attempt += 1) {
-    const inquiryNo = await allocateInquiryNo(supabase)
-    const insertPayload = await buildSupabaseInquiryPayload({ supabase, inquiryNo, actorEmail, requestId, payload })
-
-    const { error } = await supabase
-      .from("inquiries")
-      .insert(insertPayload)
-
-    if (!error) {
-      const { data: confirmedRow, error: confirmError } = await supabase
-        .from("inquiries")
-        .select("inquiry_no")
-        .eq("inquiry_no", inquiryNo)
-        .maybeSingle()
-
-      if (confirmError) throw confirmError
-      if (!confirmedRow) throw new Error(`Inquiry ${inquiryNo} was inserted but could not be confirmed in Supabase`)
-
-      return {
-        inquiryNo,
-        company: payload.company,
-        contactName: payload.contactName,
-      }
-    }
-
-    if (isUniqueViolation(error)) {
-      console.warn("[inquiry-supabase-create] duplicate allocated inquiry number; retrying", {
-        requestId,
-        inquiryNo,
-        attempt,
-        maxAllocationAttempts,
-      })
-      continue
-    }
-
-    console.error("[inquiry-supabase-create]", {
+  if (error) {
+    console.error("[inquiry-supabase-create-rpc]", {
       requestId,
-      inquiryNo,
       company_id: payload.company_id || null,
       contact_id: payload.contact_id || null,
       error: serializeSupabaseError(error),
@@ -296,5 +264,20 @@ export async function createSupabaseInquiry({
     throw error
   }
 
-  throw new Error(`Unable to allocate a unique Supabase inquiry number after ${maxAllocationAttempts} retries`)
+  const result = data as {
+    inquiryNo?: string | number | null
+    inquiry_no?: string | number | null
+    company?: string | null
+    contactName?: string | null
+    contact_name?: string | null
+  } | null
+
+  const inquiryNo = clean(result?.inquiryNo ?? result?.inquiry_no)
+  if (!inquiryNo) throw new Error("Supabase did not return an inquiry number")
+
+  return {
+    inquiryNo,
+    company: clean(result?.company) || payload.company,
+    contactName: clean(result?.contactName ?? result?.contact_name) || payload.contactName,
+  }
 }

@@ -134,6 +134,26 @@ async function getSupabaseAnalyticsRows(authorizedEmails: string[]) {
 }
 
 export async function getDashboardSummary(email: string) {
+  const { data, error } = await getSupabaseAdminClient().rpc("dashboard_summary", {
+    p_user_email: email,
+  })
+
+  if (!error && data) {
+    return data as {
+      role: string
+      team: ReturnType<typeof kpis> | null
+      mine: ReturnType<typeof kpis>
+      upcoming: Array<{ date: string; label: string; inquiryNo: string; company: string; contact: string; phone: string; stage: string; salesperson: string }>
+      teamMembers: Array<{ email: string; name: string }>
+      diagnostics: { unclassifiedTeam: number }
+    }
+  }
+
+  console.warn("[dashboard-summary] Supabase RPC unavailable; using application fallback", error)
+  return getDashboardSummaryFallback(email)
+}
+
+async function getDashboardSummaryFallback(email: string) {
   const role = await getSupabaseUserRoleInfo(email)
   const rows = await getSupabaseAnalyticsRows(role.authorizedEmails)
   const self = key(email)

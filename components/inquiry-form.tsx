@@ -36,12 +36,6 @@ type ClientLookupResponse<T> = {
   message?: string
 }
 
-type ClientEnsureResponse = {
-  success: boolean
-  message?: string
-  data?: ClientLookupRow
-}
-
 type InquirySubmissionResult = {
   requestId: string
   inquiryNo: string
@@ -156,59 +150,6 @@ export default function InquiryForm({ userEmail }: { userEmail: string }) {
     firstOwner: formData.firstOwner.trim(),
     leadGenerator: formData.leadGenerator.trim(),
   })
-
-  const ensureClientBeforeSubmit = async () => {
-    if (selectedCompanyId && selectedContactId) {
-      return {
-        company_id: selectedCompanyId,
-        contact_id: selectedContactId,
-        category_id: selectedCategoryId || "",
-      }
-    }
-
-    const res = await fetch("/api/clients/ensure", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({
-        company: formData.company.trim(),
-        contactName: formData.contactName.trim(),
-        phone: formData.phone.trim(),
-        email: formData.email.trim(),
-        category: formData.category.trim(),
-        location: formData.location.trim(),
-      }),
-    })
-    const result = (await res.json()) as ClientEnsureResponse
-
-    if (!res.ok || !result.success || !result.data) {
-      throw new Error(result.message || "Unable to save client before creating inquiry.")
-    }
-
-    const client = result.data
-    const nextCompanyId = client.company_id
-    const nextContactId = String(client.contact_id || "")
-    setSelectedCompanyId(nextCompanyId)
-    setSelectedContactId(nextContactId)
-    setSelectedCategoryId(client.category_id || null)
-    setCompanyContacts([client])
-    setCompanyLookupError("")
-    setFormData((prev) => ({
-      ...prev,
-      company: client.company_name || prev.company,
-      contactName: client.contact_person_name || prev.contactName,
-      phone: client.phone || prev.phone,
-      email: client.email || prev.email,
-      category: client.category || prev.category,
-      location: client.location || prev.location,
-    }))
-
-    return {
-      company_id: nextCompanyId,
-      contact_id: nextContactId,
-      category_id: client.category_id || "",
-    }
-  }
 
   const clearSelectedClient = () => {
     setSelectedCompanyId(null)
@@ -426,23 +367,9 @@ export default function InquiryForm({ userEmail }: { userEmail: string }) {
     setSubmitError("")
 
     if (!submissionRef.current) {
-      let clientIds: { company_id: number | string | null; contact_id: string; category_id: number | string | null }
-      try {
-        clientIds = await ensureClientBeforeSubmit()
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unable to save client before creating inquiry."
-        setSubmitError(message)
-        toast.error(message)
-        setLoading(false)
-        return
-      }
-
       submissionRef.current = {
         requestId: crypto.randomUUID(),
-        payload: {
-          ...normalizeSubmissionPayload(),
-          ...clientIds,
-        },
+        payload: normalizeSubmissionPayload(),
       }
     }
 
