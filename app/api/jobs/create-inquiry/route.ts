@@ -109,6 +109,7 @@ async function handler(request: Request) {
     businessPayload: normalizeInquiryBusinessPayload(rawJob.businessPayload as Record<string, unknown>),
     payloadHash: rawJob.payloadHash,
   }
+  await writeWorkerLog(job, "started", { startedAt: routeStartedAt })
 
   const contentPayloadHash = stableInquiryContentHash(job.businessPayload)
   const fullPayloadHash = stablePayloadHash(job.businessPayload)
@@ -116,6 +117,12 @@ async function handler(request: Request) {
     await markInquiryFailed(job, {
       errorCode: "PAYLOAD_HASH_MISMATCH",
       errorMessage: "Inquiry payload hash mismatch",
+    })
+    await writeWorkerLog(job, "failure", {
+      startedAt: routeStartedAt,
+      statusCode: 400,
+      error: new Error("Inquiry payload hash mismatch"),
+      metadata: { errorCode: "PAYLOAD_HASH_MISMATCH" },
     })
     return Response.json({ success: true, failed: true, errorCode: "PAYLOAD_HASH_MISMATCH" })
   }
@@ -126,11 +133,45 @@ async function handler(request: Request) {
       errorCode: "VALIDATION_FAILED",
       errorMessage: validation.message,
     })
+    await writeWorkerLog(job, "failure", {
+      startedAt: routeStartedAt,
+      statusCode: 400,
+      error: new Error(validation.message),
+      metadata: { errorCode: "VALIDATION_FAILED" },
+    })
     return Response.json({ success: true, failed: true, errorCode: "VALIDATION_FAILED" })
   }
 
   const existingStatus = await getInquiryQueueStatus(job.requestId)
   if (existingStatus?.status === "SUCCESS" && existingStatus.inquiryNo) {
+    const { data: confirmedRow, error: confirmError } = await getSupabaseAdminClient()
+      .from("inquiries")
+      .select("inquiry_no")
+      .eq("inquiry_no", existingStatus.inquiryNo)
+      .maybeSingle()
+
+    if (confirmError || !confirmedRow) {
+      const error = confirmError || new Error(`Inquiry ${existingStatus.inquiryNo} is marked successful but is missing in Supabase`)
+      await markInquiryFailed(job, {
+        errorCode: "SUCCESS_ROW_MISSING",
+        errorMessage: "Inquiry was marked successful but the Supabase row was not found.",
+      })
+      await writeWorkerLog(job, "failure", {
+        startedAt: routeStartedAt,
+        statusCode: 500,
+        targetId: existingStatus.inquiryNo,
+        error,
+        metadata: { errorCode: "SUCCESS_ROW_MISSING", inquiryNo: existingStatus.inquiryNo },
+      })
+      return Response.json({ success: false, failed: true, errorCode: "SUCCESS_ROW_MISSING" }, { status: 500 })
+    }
+
+    await writeWorkerLog(job, "success", {
+      startedAt: routeStartedAt,
+      statusCode: 200,
+      targetId: existingStatus.inquiryNo,
+      metadata: { idempotent: true, inquiryNo: existingStatus.inquiryNo },
+    })
     return Response.json({ success: true, idempotent: true, inquiryNo: existingStatus.inquiryNo })
   }
   if (
@@ -143,11 +184,16 @@ async function handler(request: Request) {
       errorCode: "REQUEST_ID_PAYLOAD_MISMATCH",
       errorMessage: "The same requestId was used with different inquiry data",
     })
+    await writeWorkerLog(job, "failure", {
+      startedAt: routeStartedAt,
+      statusCode: 409,
+      error: new Error("The same requestId was used with different inquiry data"),
+      metadata: { errorCode: "REQUEST_ID_PAYLOAD_MISMATCH" },
+    })
     return Response.json({ success: true, failed: true, errorCode: "REQUEST_ID_PAYLOAD_MISMATCH" })
   }
 
   await markInquiryProcessing(job)
-  await writeWorkerLog(job, "started", { startedAt: routeStartedAt })
 
   try {
     const result = await createSupabaseInquiry({

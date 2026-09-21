@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "@/lib/auth"
 import { getInquiryQueueStatus } from "@/lib/inquiry-queue"
+import { getSupabaseAdminClient } from "@/lib/supabase/server"
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -46,6 +47,42 @@ export async function GET(request: NextRequest) {
       errorMessage: queuedStatus.errorMessage || "Inquiry submission failed",
       message: queuedStatus.errorMessage || "Inquiry submission failed",
     })
+  }
+
+  if (queuedStatus.status === "SUCCESS" && queuedStatus.inquiryNo) {
+    const { data: confirmedRow, error: confirmError } = await getSupabaseAdminClient()
+      .from("inquiries")
+      .select("inquiry_no")
+      .eq("inquiry_no", queuedStatus.inquiryNo)
+      .maybeSingle()
+
+    if (confirmError) {
+      return NextResponse.json(
+        {
+          success: false,
+          pending: false,
+          requestId,
+          status: "FAILED",
+          errorCode: "SUPABASE_CONFIRMATION_FAILED",
+          message: "Inquiry was submitted, but Supabase confirmation failed. Please contact administrator.",
+        },
+        { status: 500 },
+      )
+    }
+
+    if (!confirmedRow) {
+      return NextResponse.json(
+        {
+          success: false,
+          pending: false,
+          requestId,
+          status: "FAILED",
+          errorCode: "SUCCESS_ROW_MISSING",
+          message: `Inquiry ${queuedStatus.inquiryNo} was reported created but is missing in Supabase.`,
+        },
+        { status: 409 },
+      )
+    }
   }
 
   return NextResponse.json({
