@@ -144,7 +144,19 @@ async function buildSupabaseInquiryPayload({
   payload,
 }: SyncInquiryInput & { supabase: SupabaseClient }) {
   const salesPersonEmail = normalizeEmail(actorEmail)
-  const salesperson = await getEmployeeByEmail(supabase, salesPersonEmail)
+  const [
+    salesperson,
+    secondOwnerEmpId,
+    backOfficeEmpId,
+    firstOwnerEmpId,
+    leadGeneratorEmpId,
+  ] = await Promise.all([
+    getEmployeeByEmail(supabase, salesPersonEmail),
+    getOwnerEmployeeId(supabase, payload.secondOwner),
+    getOwnerEmployeeId(supabase, payload.backOffice),
+    getOwnerEmployeeId(supabase, payload.firstOwner),
+    getOwnerEmployeeId(supabase, payload.leadGenerator),
+  ])
   const salesPersonEmpId = employeeId(salesperson)
   const nextFollowupDate = clean(payload.nextFollowupDate)
   const syncedAt = new Date().toISOString()
@@ -202,16 +214,16 @@ async function buildSupabaseInquiryPayload({
     location: clean(payload.location),
     inquiry_type: clean(payload.inquiryType),
 
-    second_owner_emp_id: await getOwnerEmployeeId(supabase, payload.secondOwner),
+    second_owner_emp_id: secondOwnerEmpId,
     second_owner_raw: clean(payload.secondOwner),
 
-    back_office_emp_id: await getOwnerEmployeeId(supabase, payload.backOffice),
+    back_office_emp_id: backOfficeEmpId,
     back_office_raw: clean(payload.backOffice),
 
-    first_owner_emp_id: await getOwnerEmployeeId(supabase, payload.firstOwner),
+    first_owner_emp_id: firstOwnerEmpId,
     first_owner_raw: clean(payload.firstOwner),
 
-    lead_generator_emp_id: await getOwnerEmployeeId(supabase, payload.leadGenerator),
+    lead_generator_emp_id: leadGeneratorEmpId,
     lead_generator_raw: clean(payload.leadGenerator),
 
     created_by_emp_id: salesPersonEmpId,

@@ -1,8 +1,9 @@
 import "server-only"
 
 import { randomUUID } from "node:crypto"
+import { after } from "next/server"
 import { getServerSession, type Session } from "@/lib/auth"
-import { getAuthenticatedSupabaseServerClient, getSupabaseAdminClient } from "@/lib/supabase/server"
+import { getSupabaseAdminClient } from "@/lib/supabase/server"
 
 type LogStatus = "started" | "success" | "failure"
 type CrudAction = "CREATE" | "READ" | "UPDATE" | "DELETE" | "AUTH" | "SYSTEM"
@@ -62,11 +63,6 @@ export function serializeError(error: unknown) {
   }
 }
 
-async function getSupabaseUserId() {
-  const auth = await getAuthenticatedSupabaseServerClient()
-  return auth.user?.id || null
-}
-
 async function writeApplicationLog(
   context: AppLogContext,
   status: LogStatus,
@@ -116,13 +112,30 @@ async function writeApplicationLog(
   }
 }
 
+function scheduleApplicationLog(
+  context: AppLogContext,
+  status: LogStatus,
+  input: {
+    requestId: string
+    session: Session | null
+    supabaseUserId: string | null
+    startedAt: number
+    statusCode?: number
+    targetId?: string | number | null
+    metadata?: Record<string, unknown>
+    error?: unknown
+  },
+) {
+  after(() => writeApplicationLog(context, status, input))
+}
+
 export async function createAppLogger(context: AppLogContext): Promise<AppLogger> {
   const requestId = context.requestId || randomUUID()
   const startedAt = Date.now()
   const session = await getServerSession()
-  const supabaseUserId = await getSupabaseUserId()
+  const supabaseUserId = null
 
-  await writeApplicationLog(context, "started", {
+  scheduleApplicationLog(context, "started", {
     requestId,
     session,
     supabaseUserId,
@@ -134,16 +147,16 @@ export async function createAppLogger(context: AppLogContext): Promise<AppLogger
     session,
     supabaseUserId,
     startedAt,
-    success: (input = {}) =>
-      writeApplicationLog(context, "success", {
+    success: async (input = {}) =>
+      scheduleApplicationLog(context, "success", {
         requestId,
         session,
         supabaseUserId,
         startedAt,
         ...input,
       }),
-    failure: (input) =>
-      writeApplicationLog(context, "failure", {
+    failure: async (input) =>
+      scheduleApplicationLog(context, "failure", {
         requestId,
         session,
         supabaseUserId,
