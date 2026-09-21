@@ -144,7 +144,7 @@ export default function ViewInquiriesClient({
 
   const formatINR = (value: string | number | undefined | null) => {
     if (value === null || value === undefined || value === "") return ""
-    const cleaned = String(value).replace(/[^0-9\-\.]/g, "")
+    const cleaned = String(value).replace(/[^0-9.-]/g, "")
     if (cleaned === "") return String(value)
     const num = Math.floor(Number(cleaned))
     if (isNaN(num)) return String(value)
