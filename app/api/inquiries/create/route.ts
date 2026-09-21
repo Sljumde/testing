@@ -6,8 +6,9 @@ import {
   stableInquiryContentHash,
   validateInquiryBusinessPayload,
 } from "@/lib/inquiry-create"
-import { markInquiryFailed, markInquiryQueued, publishInquiryCreateJob } from "@/lib/inquiry-queue"
-import { getAuthenticatedSupabaseServerClient } from "@/lib/supabase/server"
+import { markInquiryFailed, markInquiryQueued, markInquirySuccess } from "@/lib/inquiry-queue"
+import { createSupabaseInquiry } from "@/lib/supabase-inquiry-sync"
+import { getAuthenticatedSupabaseServerClient, getSupabaseAdminClient } from "@/lib/supabase/server"
 import { createAppLogger, type AppLogger } from "@/lib/app-logger"
 
 function serializeCreateError(error: unknown) {
@@ -47,8 +48,8 @@ export async function POST(request: NextRequest) {
       method: "POST",
       action: "CREATE",
       resource: "inquiries",
-      operation: "queue_create_inquiry",
-      query: "qstash.publishJSON(/api/jobs/create-inquiry)",
+      operation: "create_inquiry",
+      query: "inquiries.insert(insertPayload)",
       metadata: {
         company: rawBody?.company || null,
         contactName: rawBody?.contactName || null,
@@ -128,76 +129,76 @@ export async function POST(request: NextRequest) {
     }
 
     if (queuedStatus.status === "SUCCESS" && queuedStatus.inquiryNo) {
-      await logger.success({
-        statusCode: 200,
-        targetId: queuedStatus.inquiryNo,
-        metadata: { idempotent: true },
-      })
-      return NextResponse.json({
-        success: true,
-        requestId,
-        inquiryNo: queuedStatus.inquiryNo,
-        company: queuedStatus.company || businessPayload.company,
-        contactName: queuedStatus.contactName || businessPayload.contactName,
-        salesPersonEmail: actorEmail,
-        idempotent: true,
-      })
-    }
+      const { data: confirmedRow, error: confirmError } = await getSupabaseAdminClient()
+        .from("inquiries")
+        .select("inquiry_no")
+        .eq("inquiry_no", queuedStatus.inquiryNo)
+        .maybeSingle()
 
-    if ((queuedStatus.status === "QUEUED" && queuedStatus.qstashMessageId) || queuedStatus.status === "PROCESSING") {
-      await logger.success({
-        statusCode: 202,
-        metadata: {
-          queued: true,
-          status: queuedStatus.status,
-          qstashMessageId: queuedStatus.qstashMessageId || null,
-        },
-      })
+      if (confirmError) throw confirmError
 
-      return NextResponse.json(
-        {
-          success: false,
-          pending: true,
+      if (confirmedRow) {
+        await logger.success({
+          statusCode: 200,
+          targetId: queuedStatus.inquiryNo,
+          metadata: { idempotent: true },
+        })
+        return NextResponse.json({
+          success: true,
           requestId,
-          status: queuedStatus.status,
-          qstashMessageId: queuedStatus.qstashMessageId,
-          message: "Submission queued. Confirming Inquiry Number...",
-        },
-        { status: 202 },
-      )
+          inquiryNo: queuedStatus.inquiryNo,
+          company: queuedStatus.company || businessPayload.company,
+          contactName: queuedStatus.contactName || businessPayload.contactName,
+          salesPersonEmail: actorEmail,
+          idempotent: true,
+        })
+      }
+
+      await markInquiryFailed(job, {
+        errorCode: "SUCCESS_ROW_MISSING",
+        errorMessage: `Inquiry ${queuedStatus.inquiryNo} was marked successful but is missing in Supabase. Recreating from the original request.`,
+      })
     }
 
-    const publishResult = await publishInquiryCreateJob(job)
-
-    console.info("[inquiry-create]", {
-      requestId,
+    const result = await createSupabaseInquiry({
+      supabase: getSupabaseAdminClient(),
       actorEmail,
-      stage: "qstash_publish",
-      result: "queued",
-      messageId: publishResult.messageId,
-      routeDurationMs: Date.now() - routeStartedAt,
+      requestId,
+      payload: businessPayload,
+    })
+
+    await markInquirySuccess(job, {
+      inquiryNo: result.inquiryNo,
+      company: result.company || businessPayload.company,
+      contactName: result.contactName || businessPayload.contactName,
     })
 
     await logger.success({
-      statusCode: 202,
+      statusCode: 200,
+      targetId: result.inquiryNo,
       metadata: {
-        qstashMessageId: publishResult.messageId,
+        inquiryNo: result.inquiryNo,
         company_id: businessPayload.company_id || null,
         contact_id: businessPayload.contact_id || null,
       },
     })
 
-    return NextResponse.json(
-      {
-        success: false,
-        pending: true,
-        requestId,
-        status: "QUEUED",
-        qstashMessageId: publishResult.messageId,
-        message: "Submission queued. Confirming Inquiry Number...",
-      },
-      { status: 202 },
-    )
+    console.info("[inquiry-create]", {
+      requestId,
+      actorEmail,
+      inquiryNo: result.inquiryNo,
+      routeDurationMs: Date.now() - routeStartedAt,
+      result: "success",
+    })
+
+    return NextResponse.json({
+      success: true,
+      requestId,
+      inquiryNo: result.inquiryNo,
+      company: result.company || businessPayload.company,
+      contactName: result.contactName || businessPayload.contactName,
+      salesPersonEmail: actorEmail,
+    })
   } catch (error) {
     const serializedError = serializeCreateError(error)
 
