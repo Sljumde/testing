@@ -353,8 +353,10 @@ begin
 end;
 $$;
 
+revoke all on function public.crm_create_inquiry(uuid, text, jsonb) from public;
+revoke all on function public.crm_create_inquiry(uuid, text, jsonb) from anon;
+revoke all on function public.crm_create_inquiry(uuid, text, jsonb) from authenticated;
 grant execute on function public.crm_create_inquiry(uuid, text, jsonb) to service_role;
-grant execute on function public.crm_create_inquiry(uuid, text, jsonb) to authenticated;
 
 create or replace function public.dashboard_summary(p_user_email text)
 returns jsonb
@@ -502,8 +504,8 @@ begin
       sales_person_name_raw,
       sales_person_email_raw,
       case
-        when coalesce(nullif(next_followup_date, ''), nullif(followup_date, '')) ~ '^\d{4}-\d{2}-\d{2}' then left(coalesce(nullif(next_followup_date, ''), nullif(followup_date, '')), 10)::date
-        when coalesce(nullif(next_followup_date, ''), nullif(followup_date, '')) ~ '^\d{1,2}/\d{1,2}/\d{4}' then to_date(split_part(coalesce(nullif(next_followup_date, ''), nullif(followup_date, '')), ' ', 1), 'DD/MM/YYYY')
+        when coalesce(nullif(next_followup_date::text, ''), nullif(followup_date::text, '')) ~ '^\d{4}-\d{2}-\d{2}' then left(coalesce(nullif(next_followup_date::text, ''), nullif(followup_date::text, '')), 10)::date
+        when coalesce(nullif(next_followup_date::text, ''), nullif(followup_date::text, '')) ~ '^\d{1,2}/\d{1,2}/\d{4}' then to_date(split_part(coalesce(nullif(next_followup_date::text, ''), nullif(followup_date::text, '')), ' ', 1), 'DD/MM/YYYY')
         else null
       end as followup_day
       from public.inquiries
@@ -542,5 +544,7 @@ begin
 end;
 $$;
 
+revoke all on function public.dashboard_summary(text) from public;
+revoke all on function public.dashboard_summary(text) from anon;
+revoke all on function public.dashboard_summary(text) from authenticated;
 grant execute on function public.dashboard_summary(text) to service_role;
-grant execute on function public.dashboard_summary(text) to authenticated;
