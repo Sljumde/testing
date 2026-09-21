@@ -44,10 +44,8 @@ export default function LoginClient({ artworkNames }: LoginClientProps) {
 
       if (data.success) {
         toast.success("Login successful! Redirecting...")
-        setTimeout(() => {
-          router.push("/dashboard")
-          router.refresh()
-        }, 800)
+        router.replace("/dashboard")
+        router.refresh()
       } else {
         setError(data.message || "Invalid email or password")
         toast.error(data.message || "Invalid email or password")
