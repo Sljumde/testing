@@ -68,8 +68,8 @@ export default function LoginPage() {
     <div className="relative min-h-screen w-full overflow-hidden bg-[#050506] text-[#F8F7F4]">
       {loading && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 px-4">
-          <div className="rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="animate-spin rounded-full h-12 w-12 border-4 border-[#050506] border-t-transparent"></div>
+          <div className="rounded-3xl bg-white p-6 text-center shadow-2xl">
+            <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-[#050506] border-t-transparent"></div>
             <p className="mt-4 text-sm font-medium text-[#050506]">Logging in...</p>
           </div>
         </div>
