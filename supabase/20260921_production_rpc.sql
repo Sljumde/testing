@@ -517,6 +517,7 @@ begin
     from (
       select
         followup_day,
+        inquiry_no,
         jsonb_build_object(
           'date', followup_day::text,
           'label', case when followup_day = (timezone('Asia/Kolkata', now())::date + 1) then 'Tomorrow' else 'Day After Tomorrow' end,
