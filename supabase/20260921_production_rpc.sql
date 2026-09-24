@@ -39,7 +39,8 @@ declare
   v_inquiry_contact_id public.inquiries.contact_id%type;
   v_inquiry_category_id public.inquiries.category_id%type;
 
-  v_company text := nullif(btrim(p_payload->>'company'), '');
+  v_company_input text := nullif(btrim(p_payload->>'company'), '');
+  v_company text := v_company_input;
   v_contact_name text := nullif(btrim(p_payload->>'contactName'), '');
   v_phone text := nullif(regexp_replace(coalesce(p_payload->>'phone', ''), '\D', '', 'g'), '');
   v_email text := nullif(btrim(p_payload->>'email'), '');
@@ -56,6 +57,7 @@ declare
   v_lead_generator_emp_id public.employees.emp_id%type;
 
   v_next_followup_date text := nullif(btrim(p_payload->>'nextFollowupDate'), '');
+  v_next_followup_at timestamptz;
   v_budget numeric;
   v_quantity numeric;
   v_owner text;
@@ -89,11 +91,16 @@ begin
       from public.companies
      where company_id = v_company_id
      limit 1;
+
+    if not found then
+      v_company_id := null;
+      v_company := v_company_input;
+    end if;
   end if;
 
   if v_company_id is null and v_company is not null then
-    select company_id, company_name
-      into v_company_id, v_company
+    select company_id
+      into v_company_id
       from public.companies
      where lower(btrim(company_name)) = lower(v_company)
      limit 1;
@@ -226,6 +233,12 @@ begin
     v_quantity := (p_payload->>'quantity')::numeric;
   end if;
 
+  if v_next_followup_date ~ '^\d{4}-\d{2}-\d{2}' then
+    v_next_followup_at := left(v_next_followup_date, 10)::date;
+  elsif v_next_followup_date ~ '^\d{1,2}/\d{1,2}/\d{4}' then
+    v_next_followup_at := to_date(split_part(v_next_followup_date, ' ', 1), 'DD/MM/YYYY');
+  end if;
+
   v_inquiry_company_id := v_company_id::text;
   v_inquiry_contact_id := v_contact_id::text;
   v_inquiry_category_id := v_category_id::text;
@@ -295,12 +308,12 @@ begin
         nullif(btrim(p_payload->>'salesStage'), ''),
         nullif(btrim(p_payload->>'updateRemarks'), ''),
         nullif(btrim(p_payload->>'nextSteps'), ''),
-        v_next_followup_date,
+        v_next_followup_at,
         v_budget,
         nullif(p_payload->>'budget', ''),
         v_quantity,
         nullif(p_payload->>'quantity', ''),
-        v_next_followup_date,
+        v_next_followup_at,
         v_next_followup_date,
         nullif(btrim(p_payload->>'occasion'), ''),
         v_location,
